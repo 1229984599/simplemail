@@ -1,34 +1,82 @@
 # ============================================================
-# Postfix master.cf - 服务定义
+# Postfix master.cf - 服务进程定义
 # ============================================================
+# 本文件定义 Postfix 的各个服务守护进程。
+# 大多数条目保持默认即可，需要关注的只有：
+#   1. 第一行 smtp 服务（SMTP 收件端口）
+#   2. 最后两行 mailreceiver（核心：邮件投递到 Go API 的管道）
 #
-# ==========================================================================
+# ============================================================
+# 【SMTP 端口联动说明】
+# ============================================================
+# 第一行 "smtp inet ..." 定义 Postfix 在容器内监听的 SMTP 端口。
+# "smtp" 是服务名，对应标准 25 端口（由系统服务文件 /etc/services 定义）。
+# ⚠️  如果需要修改 SMTP 端口（不建议，会导致收不到邮件）：
+#   将 "smtp" 改为具体端口号（如 "2525"），同时修改：
+#   - docker-compose.yml → postfix.ports 右边的端口
+#
+# ============================================================
+# 【mailreceiver 联动说明】
+# ============================================================
+# mailreceiver 是本系统的核心 transport：
+#   每收到一封邮件，Postfix 调用 /usr/local/bin/mail-receiver ${recipient}
+#   mail-receiver 解析 MIME 后 POST 到 http://api:8080/internal/deliver
+# ⚠️  如果修改了 Go API 端口，需同步修改 postfix/entrypoint.sh 中的 API_URL
+#     （mail-receiver.py 通过 API_URL 环境变量获取地址，不在本文件中配置）
+#
+# ============================================================
+# 列说明（列宽对齐，含义如下）：
 # service type  private unpriv  chroot  wakeup  maxproc command + args
-# ==========================================================================
-smtp      inet  n       -       n       -       100     smtpd
-pickup    unix  n       -       n       60      1       pickup
-cleanup   unix  n       -       n       -       0       cleanup
-qmgr      unix  n       -       n       300     1       qmgr
-tlsmgr    unix  -       -       n       1000?   1       tlsmgr
-rewrite   unix  -       -       n       -       -       trivial-rewrite
-bounce    unix  -       -       n       -       0       bounce
-defer     unix  -       -       n       -       0       bounce
-trace     unix  -       -       n       -       0       bounce
-verify    unix  -       -       n       -       1       verify
-flush     unix  n       -       n       1000?   0       flush
-proxymap  unix  -       -       n       -       -       proxymap
-smtp      unix  -       -       n       -       -       smtp
-relay     unix  -       -       n       -       -       smtp
-error     unix  -       -       n       -       -       error
-retry     unix  -       -       n       -       -       error
-discard   unix  -       -       n       -       -       discard
-local     unix  -       n       n       -       -       local
-virtual   unix  -       n       n       -       -       virtual
-lmtp      unix  -       -       n       -       -       lmtp
-anvil     unix  -       -       n       -       1       anvil
-scache    unix  -       -       n       -       1       scache
-postlog   unix-dgram n  -       n       -       1       postlogd
+#   -       -   n=否    n=否    n=不    秒/触发  进程数   命令
+# ============================================================
 
-# Pipe to Go mail receiver
+# ── 标准 SMTP 服务（收件端口 25）────────────────────────────
+# ⚠️  "smtp" 对应系统标准 25 端口（/etc/services 中定义）
+#     如需修改端口，将 smtp 改为数字（如 2525），并同步修改 docker-compose.yml
+smtp      inet  n       -       n       -       100     smtpd
+
+# ── 内部处理服务（保持默认，无需修改）─────────────────────────
+pickup    unix  n       -       n       60      1       pickup    # 从 maildrop 队列取件
+cleanup   unix  n       -       n       -       0       cleanup   # 清理邮件头
+qmgr      unix  n       -       n       300     1       qmgr      # 队列管理器
+tlsmgr    unix  -       -       n       1000?   1       tlsmgr    # TLS 会话缓存
+rewrite   unix  -       -       n       -       -       trivial-rewrite
+bounce    unix  -       -       n       -       0       bounce    # 退信处理
+defer     unix  -       -       n       -       0       bounce    # 延迟退信
+trace     unix  -       -       n       -       0       bounce    # 投递跟踪
+verify    unix  -       -       n       -       1       verify    # 地址验证
+flush     unix  n       -       n       1000?   0       flush     # 快速刷新
+proxymap  unix  -       -       n       -       -       proxymap  # 代理映射查询
+smtp      unix  -       -       n       -       -       smtp      # SMTP 客户端（发件）
+relay     unix  -       -       n       -       -       smtp      # 中继
+error     unix  -       -       n       -       -       error     # 错误处理
+retry     unix  -       -       n       -       -       error     # 重试
+discard   unix  -       -       n       -       -       discard   # 丢弃
+local     unix  -       n       n       -       -       local     # 本地投递（已禁用）
+virtual   unix  -       n       n       -       -       virtual   # 虚拟邮箱投递
+lmtp      unix  -       -       n       -       -       lmtp      # LMTP 协议
+anvil     unix  -       -       n       -       1       anvil     # 连接速率统计
+scache    unix  -       -       n       -       1       scache    # 会话缓存
+postlog   unix-dgram n  -       n       -       1       postlogd  # 日志服务
+
+# ── mailreceiver：核心投递管道（将邮件传递给 Go API）────────────
+# ⚠️  这是本系统最重要的配置！
+#
+# 工作流程：
+#   外部邮件 → Postfix(25端口) → mailreceiver transport
+#           → 调用 /usr/local/bin/mail-receiver ${recipient}
+#           → mail-receiver.py 解析 MIME
+#           → HTTP POST 到 http://api:8080/internal/deliver
+#           → Go API 写入数据库
+#
+# 参数说明：
+#   flags=DRhu  D=不在 From 行加转义 R=添加 Return-Path 头
+#               h=地址转小写 u=用户名转小写
+#   user=nobody 以低权限用户运行（安全最佳实践）
+#   maxproc=50  最多同时处理 50 封邮件（高并发时可适当调大）
+#   argv=...    实际调用的命令（${recipient} 由 Postfix 自动替换为收件地址）
+#
+# ⚠️  如果修改了 API 端口，请修改 postfix/entrypoint.sh（非本文件）
+#     因为 mail-receiver.py 通过 API_URL 环境变量读取地址
 mailreceiver unix -       n       n       -       50      pipe
   flags=DRhu user=nobody argv=/usr/local/bin/mail-receiver ${recipient}

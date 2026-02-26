@@ -1,5 +1,25 @@
 /* ============================================================
-   TempMail SPA — 主应用逻辑
+   TempMail SPA — 前端单页应用主逻辑
+   ============================================================
+   技术栈：原生 JavaScript（无框架），CommonJS 模块规范
+   运行环境：Nginx 静态服务，通过 /api/* 反向代理到 Go API
+
+   架构概览：
+     state     — 全局状态对象（API Key、账户信息、当前页面、缓存数据）
+     api       — HTTP 客户端封装（自动注入 Authorization 头）
+     navigate  — 客户端路由（SPA 页面切换，无页面刷新）
+     renderXxx — 各页面渲染函数（dashboard/inbox/email-view/admin-*）
+     showModal — 通用确认弹窗
+     toast     — 轻量级消息通知
+
+   状态持久化（localStorage）：
+     tm_apikey   — API Key
+     tm_account  — 账户信息 JSON
+     tm_theme    — 主题（light/dark）
+
+   自动轮询：
+     收件箱每 8 秒自动刷新邮件列表（_inboxPollerTimer）
+     pending 域名每 5 秒轮询 MX 验证状态（_pendingPollerTimer）
    ============================================================ */
 
 'use strict';
@@ -8,7 +28,9 @@
 const API_BASE = '/api';
 const PUBLIC_BASE = '/public';
 
-// ─── 状态 ───────────────────────────────────────────────────
+// ─── 全局状态 ──────────────────────────────────────────────────
+// 所有可变状态集中在此对象，避免全局变量散落各处。
+// 注意：此对象非响应式，状态变更后需手动调用 navigate/renderPage 刷新视图。
 const state = {
   apiKey:    localStorage.getItem('tm_apikey') || '',
   account:   JSON.parse(localStorage.getItem('tm_account') || 'null'),
@@ -70,6 +92,19 @@ async function copyText(text) {
 }
 
 // ─── API 客户端 ─────────────────────────────────────────────
+/**
+ * apiFetch — 统一的 API 请求封装函数
+ *
+ * 功能：
+ *   - 自动注入 Authorization: Bearer <apiKey> 请求头
+ *   - 自动解析 JSON 响应
+ *   - 将非 2xx 状态码转换为 Error 抛出（含 error 字段消息）
+ *
+ * @param {string} path  — 请求路径（相对或绝对）
+ * @param {object} opts  — fetch 选项（method/body/headers 等）
+ * @returns {Promise<object>} 解析后的 JSON 数据
+ * @throws {Error} 请求失败或 HTTP 错误时抛出
+ */
 async function apiFetch(path, opts = {}) {
   const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
   if (state.apiKey) headers['Authorization'] = `Bearer ${state.apiKey}`;
@@ -99,6 +134,26 @@ const api = {
   // 轮询域名状态（任意已登录用户，不需要管理员权限）
   getDomainStatus: id => apiFetch(API_BASE + '/domains/' + id + '/status'),
   // 邮箱 → 解包 {data:[...]}
+  // createMailbox 支持以下几种调用方式：
+  //   api.createMailbox()
+  //     → 随机地址 + 随机活跃域名
+  //   api.createMailbox({ address: 'mybox' })
+  //     → mybox@<随机活跃域名>
+  //   api.createMailbox({ domain: 'example.com' })
+  //     → <随机地址>@example.com（domain 必须是已激活域名）
+  //   api.createMailbox({ address: 'mybox', domain: 'example.com' })
+  //     → mybox@example.com
+  //
+  // 请求体示例（POST /api/mailboxes）：
+  //   {}
+  //   {"address":"mybox"}
+  //   {"domain":"example.com"}
+  //   {"address":"mybox","domain":"example.com"}
+  //
+  // 错误响应：
+  //   400 → domain 不存在或未激活
+  //   409 → 地址已被占用（重试即可）
+  //   503 → 系统内无可用活跃域名
   createMailbox:   (body) => apiFetch(API_BASE + '/mailboxes', { method: 'POST', body: JSON.stringify(body || {}) }).then(d => d.mailbox || d),
   listMailboxes:   () => apiFetch(API_BASE + '/mailboxes').then(d => Array.isArray(d) ? d : (d.data || [])),
   deleteMailbox: id  => apiFetch(API_BASE + '/mailboxes/' + id, { method: 'DELETE' }),
@@ -156,7 +211,20 @@ function logout() {
   showAuthPage();
 }
 
-// ─── 路由 ─────────────────────────────────────────────────────
+// ─── 客户端路由 ───────────────────────────────────────────────
+/**
+ * navigate — 切换当前显示的页面（SPA 路由）
+ *
+ * 职责：
+ *   1. 关闭移动端侧边栏
+ *   2. 离开收件箱时停止自动刷新定时器
+ *   3. 更新 state.page 和附加参数（如 currentMailbox）
+ *   4. 调用 renderPage 重新渲染内容区
+ *   5. 更新侧边导航的高亮状态
+ *
+ * @param {string} page    — 页面标识符（如 'dashboard' / 'inbox' / 'admin-domains'）
+ * @param {object} params  — 附加到 state 的参数（如 {currentMailbox: {id, full_address}}）
+ */
 function navigate(page, params = {}) {
   closeSidebar();
   // 离开收件箱时停止自动刷新
@@ -395,6 +463,13 @@ window.closeSidebar = function() {
 };
 
 // ─── 页面渲染路由 ───────────────────────────────────────────
+/**
+ * renderPage — 根据 page 标识符渲染对应的页面内容
+ *
+ * 先显示 loading spinner，再根据 page 分发到各 renderXxx 函数。
+ * 若渲染出错（网络请求失败等），显示红色错误提示。
+ * 同时更新顶部栏的标题和副标题。
+ */
 async function renderPage(page) {
   const container = $('page-content');
   if (!container) return;
@@ -434,7 +509,14 @@ async function renderPage(page) {
   }
 }
 
-// ─── Dashboard ─────────────────────────────────────────────
+// ─── Dashboard 页面 ──────────────────────────────────────────
+/**
+ * renderDashboard — 渲染主控制台页面
+ *
+ * 并行获取：邮箱列表、域名列表、全局统计数据
+ * 展示：统计卡片、公告栏、邮箱卡片列表（含过期倒计时）
+ * 顶部栏操作按钮：新建邮箱 / 查看 API Key
+ */
 async function renderDashboard(container) {
   const isAdmin = state.account?.is_admin;
   const [mailboxes, domains, statsData] = await Promise.all([
@@ -584,7 +666,17 @@ function renderApiKeyShow(container) {
   `;
 }
 
-// ─── Inbox ────────────────────────────────────────────────
+// ─── 收件箱页面 ───────────────────────────────────────────────
+/**
+ * renderInbox — 渲染指定邮箱的邮件列表
+ *
+ * 功能：
+ *   - 展示所有邮件的发件人、主题、预览和时间
+ *   - 启动 8 秒自动刷新（仅在邮件数量或最新 ID 变化时重渲染，避免闪烁）
+ *   - 切换到其他页面时自动停止轮询
+ *
+ * 依赖 state.currentMailbox 中的 {id, full_address}
+ */
 async function renderInbox(container) {
   const mb = state.currentMailbox;
   if (!mb) { navigate('dashboard'); return; }
@@ -679,7 +771,17 @@ window.deleteEmail = async function(mbId, eid) {
   } catch(e) { toast('删除失败: ' + e.message, 'error'); }
 };
 
-// ─── Email View ────────────────────────────────────────────
+// ─── 邮件详情页面 ─────────────────────────────────────────────
+/**
+ * renderEmailView — 渲染单封邮件的完整内容
+ *
+ * 若邮件包含 HTML 正文，使用 <iframe sandbox="allow-same-origin allow-popups">
+ * 隔离渲染，防止 XSS（iframe 中 JS 不执行）。
+ * 若仅有纯文本，使用 white-space:pre-wrap 展示。
+ * iframe 高度在加载后动态调整为内容实际高度。
+ *
+ * 依赖 state.currentMailbox 和 state.currentEmailId
+ */
 async function renderEmailView(container) {
   const mb = state.currentMailbox;
   const eid = state.currentEmailId;
@@ -1355,13 +1457,24 @@ function showModal(title, bodyHtml, onConfirm) {
   });
 }
 
-// ─── MX 自动注册（全自动验证流程）──────────────────────────
-// 轮询待验证域名状态
+// ─── MX 自动注册 & 轮询 ──────────────────────────────────────
+// 两个定时器：
+//   _inboxPollerTimer   — 收件箱每 8 秒刷新（仅在 inbox 页面运行）
+//   _pendingPollerTimer — pending 域名每 5 秒轮询 MX 验证状态
 let _pendingPollerTimer = null;
 let _inboxPollerTimer   = null;
 function clearInboxPoller() {
   if (_inboxPollerTimer) { clearInterval(_inboxPollerTimer); _inboxPollerTimer = null; }
 }
+/**
+ * startPendingDomainPoller — 启动 pending 域名的状态轮询
+ *
+ * 每 5 秒调用 GET /api/domains/:id/status，检查是否已激活。
+ * 域名激活后从轮询集合中移除，并更新 DOM 中对应行的状态徽章。
+ * 所有域名均已激活时自动停止定时器。
+ *
+ * @param {number[]} ids — 需要轮询的 pending 域名 ID 列表
+ */
 function startPendingDomainPoller(ids) {
   if (!ids || ids.length === 0) return;
   clearInterval(_pendingPollerTimer);
@@ -1523,18 +1636,35 @@ curl "${base}/api/me?api_key=${key}"`,
     },
     {
       title: '📫 1. 创建临时邮箱',
-      desc: 'POST /api/mailboxes — 随机生成一个临时邮箱，30 分钟后自动删除',
-      code: `# 随机地址创建
+      desc: 'POST /api/mailboxes — 支持随机/指定地址、随机/指定域名，30 分钟后自动删除（由 mailbox_ttl_minutes 设置控制）',
+      code: `# 随机地址 + 随机域名（最简调用）
 curl -s -X POST ${base}/api/mailboxes \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
   -d '{}'
 
-# 指定前缀创建
+# 指定本地部分（@ 之前），域名仍随机
 curl -s -X POST ${base}/api/mailboxes \\
   -H "Authorization: Bearer ${key}" \\
   -H "Content-Type: application/json" \\
-  -d '{"address": "mytestbox"}'`,
+  -d '{"address": "mytestbox"}'
+
+# 指定域名（domain 必须是已激活域名），地址随机
+curl -s -X POST ${base}/api/mailboxes \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"domain": "example.com"}'
+
+# 同时指定地址和域名 → mytestbox@example.com
+curl -s -X POST ${base}/api/mailboxes \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"address": "mytestbox", "domain": "example.com"}'
+
+# 错误响应说明：
+#   400 → domain 不存在或未激活（检查 GET /api/domains 确认可用域名）
+#   409 → 地址已被占用（更换 address 或不传让系统随机生成）
+#   503 → 系统内无可用活跃域名（需要管理员先添加域名）`,
     },
     {
       title: '📌 2. 获取邮箱列表',
@@ -1673,7 +1803,16 @@ k6 run /tmp/test.js`,
   `;
 }
 
-// ─── 启动 ──────────────────────────────────────────────────
+// ─── 应用启动入口 ─────────────────────────────────────────────
+/**
+ * init — 页面加载完成后的初始化入口（由 DOMContentLoaded 事件触发）
+ *
+ * 启动逻辑：
+ *   1. 应用主题（从 localStorage 读取）
+ *   2. 若 localStorage 中有有效的 apiKey + account → 直接进入主界面
+ *   3. 若只有 apiKey（无 account 缓存）→ 调用 /api/me 验证有效性
+ *   4. 否则 → 展示登录页
+ */
 function init() {
   applyTheme(state.theme);
 

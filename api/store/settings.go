@@ -1,3 +1,8 @@
+// Package store 的 settings.go 实现对 app_settings 表的读写操作。
+//
+// app_settings 是一张 key-value 表，存储可在运行时动态修改的系统配置，
+// 例如注册开关、邮箱 TTL、站点标题、SMTP 服务器信息等。
+// 这些配置优先级高于环境变量（handler 层先查 DB，再 fallback 到 env）。
 package store
 
 import (

@@ -1,3 +1,23 @@
+// Package main 是 TempMail API 服务的入口。
+//
+// 服务架构概览：
+//   - HTTP 框架：Gin（高性能路由 + 中间件链）
+//   - 数据库：PostgreSQL（通过 PgBouncer 连接池，最大 500 并发连接）
+//   - 缓存/限速：Redis（滑动窗口计数器，默认 500次/60秒）
+//   - 邮件接收：Postfix → mail-receiver.py → /internal/deliver
+//
+// 路由结构：
+//   /health               健康检查，无需认证
+//   /public/*             公开接口（注册、统计、站点配置）
+//   /api/*                需要 API Key 认证 + 速率限制
+//   /api/admin/*          额外要求 is_admin=true
+//   /internal/*           仅限 Docker 内网（Postfix 调用）
+//
+// 后台 Goroutine（4 个）：
+//   1. 邮箱过期清理器    — 每 1 分钟删除 expires_at < NOW() 的邮箱（级联删邮件）
+//   2. MX 待验证轮询    — 每 30 秒检查 pending 域名，通过则升级为 active
+//   3. MX 健康复检      — 每 6 小时重检 active 域名，失效则降级为 disabled
+//   4. 管理员 Key 写文件 — 启动 1 秒后将 admin API Key 写入 /data/admin.key
 package main
 
 import (

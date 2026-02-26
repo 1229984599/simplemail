@@ -1,3 +1,4 @@
+// Package handler - domain 处理器
 package handler
 
 import (
@@ -13,17 +14,31 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// DomainHandler 处理域名池相关的 HTTP 请求。
+//
+// 路由挂载（部分需要管理员权限）：
+//   GET    /api/domains                    — List（列出所有域名）
+//   GET    /api/domains/:id/status         — GetStatus（轮询 MX 验证进度）
+//   POST   /api/domains/submit             — Submit（任意用户提交域名验证）
+//   POST   /api/admin/domains              — Add（管理员直接添加）
+//   DELETE /api/admin/domains/:id          — Delete
+//   PUT    /api/admin/domains/:id/toggle   — Toggle（启用/停用）
+//   POST   /api/admin/domains/mx-import   — MXImport（带检测的导入）
+//   POST   /api/admin/domains/mx-register — MXRegister（提交等待自动验证）
+//   GET    /api/admin/domains/:id/status  — GetStatus（管理员版，同非管理员版）
 type DomainHandler struct {
 	store        *store.Store
-	cfgIP        string // SMTP_SERVER_IP env
-	cfgHostname  string // SMTP_HOSTNAME env
+	cfgIP        string // 启动时从 SMTP_SERVER_IP 环境变量读取的备用 IP
+	cfgHostname  string // 启动时从 SMTP_HOSTNAME 环境变量读取的备用主机名
 }
 
+// NewDomainHandler 构造 DomainHandler，注入 Store 和启动配置。
 func NewDomainHandler(s *store.Store, smtpIP, smtpHostname string) *DomainHandler {
 	return &DomainHandler{store: s, cfgIP: smtpIP, cfgHostname: smtpHostname}
 }
 
-// getServerIP 优先读 DB 设置，其次环境变量传入的值
+// getServerIP 返回服务器公网 IP，优先读 DB 配置（可运行时修改），
+// 其次 fallback 到启动时传入的环境变量值。
 func (h *DomainHandler) getServerIP(ctx context.Context) string {
 	if ip, err := h.store.GetSetting(ctx, "smtp_server_ip"); err == nil && ip != "" {
 		return ip
@@ -31,8 +46,9 @@ func (h *DomainHandler) getServerIP(ctx context.Context) string {
 	return h.cfgIP
 }
 
-// getServerHostname 返回 MX 记录应指向的邮件服务器 hostname
-// 优先: DB 设置 smtp_hostname → 环境变量 → 空串（傻用 mail.提交域名 方式）
+// getServerHostname 返回 MX 记录应指向的邮件服务器主机名。
+// 优先级：DB 设置 smtp_hostname → 环境变量 SMTP_HOSTNAME → 空串
+// 若为空串，则 DNS 配置提示中会建议用户创建 mail.<domain> 的 A 记录。
 func (h *DomainHandler) getServerHostname(ctx context.Context) string {
 	if hn, err := h.store.GetSetting(ctx, "smtp_hostname"); err == nil && hn != "" {
 		return hn
@@ -40,7 +56,9 @@ func (h *DomainHandler) getServerHostname(ctx context.Context) string {
 	return h.cfgHostname
 }
 
-// POST /api/admin/domains - 添加域名到池（管理员）
+// Add 直接将域名以 active 状态加入域名池（管理员，跳过 MX 验证）。
+// POST /api/admin/domains
+// 响应额外包含 dns_records 字段，提示管理员需要配置的 DNS 记录。
 func (h *DomainHandler) Add(c *gin.Context) {
 	var req struct {
 		Domain string `json:"domain" binding:"required"`
@@ -85,7 +103,9 @@ func (h *DomainHandler) Add(c *gin.Context) {
 	})
 }
 
-// GET /api/domains - 列出所有域名（共享域名池）
+// List 返回所有域名（含状态），供已认证用户查看域名池。
+// GET /api/domains
+// 包含 pending/disabled 状态的域名，前端可据此展示验证进度。
 func (h *DomainHandler) List(c *gin.Context) {
 	_ = middleware.GetAccount(c) // 确保已认证
 
@@ -98,7 +118,8 @@ func (h *DomainHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"domains": domains})
 }
 
-// DELETE /api/admin/domains/:id - 删除域名（管理员）
+// Delete 从域名池中永久删除域名（管理员）。
+// DELETE /api/admin/domains/:id
 func (h *DomainHandler) Delete(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -114,7 +135,9 @@ func (h *DomainHandler) Delete(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "domain deleted"})
 }
 
-// PUT /api/admin/domains/:id/toggle - 启用/禁用域名（管理员）
+// Toggle 手动切换域名的启用/停用状态（管理员）。
+// PUT /api/admin/domains/:id/toggle
+// 请求体：{"active": true|false}
 func (h *DomainHandler) Toggle(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -138,8 +161,13 @@ func (h *DomainHandler) Toggle(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "domain updated"})
 }
 
-// POST /api/admin/domains/mx-import - MX快捷接入（DNS检测并自动导入）
-// body: {"domain":"example.com", "force":false}
+// MXImport 先执行 DNS MX 检测，通过则导入（管理员）。
+// POST /api/admin/domains/mx-import
+// 请求体：{"domain": "example.com", "force": false}
+//
+// 流程：
+//   - force=false：先做 MX 检测，通过则激活加入，未通过返回 422 + DNS 配置提示
+//   - force=true：跳过 MX 检测，直接以 active 状态导入（适用于已确认 DNS 正确的情况）
 func (h *DomainHandler) MXImport(c *gin.Context) {
 	var req struct {
 		Domain string `json:"domain" binding:"required"`
@@ -203,8 +231,16 @@ func (h *DomainHandler) MXImport(c *gin.Context) {
 	})
 }
 
-// POST /api/admin/domains/mx-register - 提交域名等待自动MX验证（无需手动确认）
-// body: {"domain":"example.com"}
+// MXRegister 提交域名进入自动 MX 验证流程（无需手动确认）。
+// POST /api/admin/domains/mx-register（管理员）
+// POST /api/domains/submit（任意已登录用户，通过 Submit 代理调用）
+//
+// 流程：
+//  1. 立即做一次 MX 检测
+//     - 通过 → 直接以 active 状态激活，返回 201
+//     - 未通过 → 写入 pending 状态，返回 202（Accepted）
+//  2. pending 状态的域名由后台 goroutine 每 30 秒自动重检，通过后自动激活
+//  3. 响应中包含 dns_required 字段，告知用户需要配置的 DNS 记录
 func (h *DomainHandler) MXRegister(c *gin.Context) {
 	var req struct {
 		Domain string `json:"domain" binding:"required"`
@@ -281,13 +317,17 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	})
 }
 
-// POST /api/domains/submit — 任意已登录用户提交域名进行 MX 自动验证
-// 与 MXRegister 逻辑相同，但不需要管理员权限
+// Submit 是 MXRegister 的别名，供任意已登录用户（非管理员）调用。
+// POST /api/domains/submit
+// 与 MXRegister 逻辑完全相同，仅路由权限不同（无需 AdminOnly 中间件）。
 func (h *DomainHandler) Submit(c *gin.Context) {
 	h.MXRegister(c) // 复用相同逻辑
 }
 
-// GET /api/admin/domains/:id/status - 查询域名状态（用于前端轮询）
+// GetStatus 查询指定域名的当前状态，供前端轮询 MX 验证进度。
+// GET /api/domains/:id/status（任意已登录用户）
+// GET /api/admin/domains/:id/status（管理员）
+// 返回 id / domain / status / is_active / mx_checked_at。
 func (h *DomainHandler) GetStatus(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
