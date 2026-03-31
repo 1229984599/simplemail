@@ -5,29 +5,30 @@ import (
 	"time"
 )
 
-// GetSetting 读取单个配置项
+// GetSetting reads a single setting value.
 func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 	var value string
-	err := s.pool.QueryRow(ctx,
-		`SELECT value FROM app_settings WHERE key = $1`, key,
+	err := s.db.QueryRowContext(ctx,
+		`SELECT value FROM app_settings WHERE key = ?`, key,
 	).Scan(&value)
 	return value, err
 }
 
-// SetSetting 写入配置项（upsert）
+// SetSetting writes a setting value (upsert).
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
-	_, err := s.pool.Exec(ctx,
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO app_settings (key, value, updated_at)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = $3`,
-		key, value, time.Now(),
+         VALUES (?, ?, ?)
+         ON CONFLICT (key) DO UPDATE SET value = ?, updated_at = ?`,
+		key, value, now, value, now,
 	)
 	return err
 }
 
-// GetAllSettings 读取所有配置项
+// GetAllSettings reads all settings.
 func (s *Store) GetAllSettings(ctx context.Context) (map[string]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT key, value FROM app_settings`)
+	rows, err := s.db.QueryContext(ctx, `SELECT key, value FROM app_settings`)
 	if err != nil {
 		return nil, err
 	}
