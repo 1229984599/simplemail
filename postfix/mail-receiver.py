@@ -19,7 +19,7 @@ import urllib.error
 # 需要在 docker-compose.yml 的 postfix.environment 中添加：
 #   API_URL: http://api:9000
 # 或者直接修改下面这行的默认值 "http://api:8080" → "http://api:9000"
-API_URL = os.environ.get("API_URL", "http://api:8080")
+API_URL = os.environ.get("API_URL", "http://localhost:8080")
 
 
 def main():

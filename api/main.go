@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"embed"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -17,8 +19,10 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
 )
+
+//go:embed all:frontend
+var frontendFS embed.FS
 
 func main() {
 	cfg := config.Load()
@@ -32,23 +36,6 @@ func main() {
 	defer db.Close()
 	log.Println("✓ Database connected")
 
-	// ==================== 连接 Redis ====================
-	rdb := redis.NewClient(&redis.Options{
-		Addr:         cfg.RedisAddr,
-		Password:     cfg.RedisPassword,
-		DB:           0,
-		PoolSize:     0,      // 0 = 不限（自动按 CPU 核心数 * 10）
-		MinIdleConns: 20,
-		DialTimeout:  3 * time.Second,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
-	})
-	if err := rdb.Ping(ctx).Err(); err != nil {
-		log.Fatalf("failed to connect redis: %v", err)
-	}
-	defer rdb.Close()
-	log.Println("✓ Redis connected")
-
 	// ==================== Gin 路由 ====================
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -56,11 +43,11 @@ func main() {
 
 	// CORS：允许前端跨域访问
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
-		ExposeHeaders:    []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
-		MaxAge:           12 * time.Hour,
+		AllowOrigins:  []string{"*"},
+		AllowMethods:  []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowHeaders:  []string{"Origin", "Content-Type", "Authorization"},
+		ExposeHeaders: []string{"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
+		MaxAge:        12 * time.Hour,
 	}))
 
 	// 健康检查（无需认证）
@@ -70,12 +57,12 @@ func main() {
 
 	// 初始化 handlers
 	accountH := handler.NewAccountHandler(db)
-	domainH  := handler.NewDomainHandler(db, cfg.SMTPServerIP, cfg.SMTPHostname)
+	domainH := handler.NewDomainHandler(db, cfg.SMTPServerIP, cfg.SMTPHostname)
 	mailboxH := handler.NewMailboxHandler(db)
-	emailH   := handler.NewEmailHandler(db)
+	emailH := handler.NewEmailHandler(db)
 	settingH := handler.NewSettingHandler(db)
 	registerH := handler.NewRegisterHandler(db)
-	statsH   := handler.NewStatsHandler(db)
+	statsH := handler.NewStatsHandler(db)
 
 	// 公开路由（无需认证）
 	public := r.Group("/public")
@@ -86,9 +73,10 @@ func main() {
 	}
 
 	// API 路由组（需要认证 + 速率限制）
+	rl := middleware.NewInMemoryRateLimiter(cfg.RateLimit, cfg.RateWindow)
 	api := r.Group("/api")
 	api.Use(middleware.Auth(db))
-	api.Use(middleware.RateLimit(rdb, cfg.RateLimit, cfg.RateWindow))
+	api.Use(middleware.RateLimit(rl))
 	{
 		// 当前用户
 		api.GET("/me", accountH.Me)
@@ -106,9 +94,9 @@ func main() {
 		api.DELETE("/mailboxes/:id", mailboxH.Delete)
 
 		// 邮件管理
-                api.GET("/mailboxes/:id/emails", emailH.List)
-                api.GET("/mailboxes/:id/emails/:email_id", emailH.Get)
-                api.DELETE("/mailboxes/:id/emails/:email_id", emailH.Delete)
+		api.GET("/mailboxes/:id/emails", emailH.List)
+		api.GET("/mailboxes/:id/emails/:email_id", emailH.Get)
+		api.DELETE("/mailboxes/:id/emails/:email_id", emailH.Delete)
 		// 管理员路由
 		admin := api.Group("/admin")
 		admin.Use(middleware.AdminOnly())
@@ -176,6 +164,18 @@ func main() {
 			c.JSON(http.StatusOK, gin.H{"status": "delivered", "email_id": email.ID})
 		})
 	}
+
+	// ==================== 静态文件（嵌入前端 SPA）====================
+	frontendSub, _ := fs.Sub(frontendFS, "frontend")
+
+	// 静态资源
+	r.StaticFS("/css", http.FS(frontendSub))
+	r.StaticFS("/js", http.FS(frontendSub))
+
+	// SPA fallback: 非 API 路径返回 index.html
+	r.NoRoute(func(c *gin.Context) {
+		c.FileFromFS("index.html", http.FS(frontendSub))
+	})
 
 	// ==================== 邮箱自动过期清理 ====================
 	go func() {
