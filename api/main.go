@@ -201,9 +201,9 @@ func main() {
 				if len(pendingDomains) == 0 {
 					continue
 				}
-				serverIP := cfg.SMTPServerIP
+				serverIP, _ := db.GetSetting(context.Background(), "smtp_server_ip")
 				if serverIP == "" {
-					serverIP, _ = db.GetSetting(context.Background(), "smtp_server_ip")
+					serverIP = cfg.SMTPServerIP
 				}
 				for _, d := range pendingDomains {
 					matched, _, mxStatus := store.CheckDomainMX(d.Domain, serverIP)
@@ -226,9 +226,9 @@ func main() {
 					log.Printf("[mx-recheck] list active error: %v", err)
 					continue
 				}
-				serverIP := cfg.SMTPServerIP
+				serverIP, _ := db.GetSetting(context.Background(), "smtp_server_ip")
 				if serverIP == "" {
-					serverIP, _ = db.GetSetting(context.Background(), "smtp_server_ip")
+					serverIP = cfg.SMTPServerIP
 				}
 				log.Printf("[mx-recheck] checking %d active domains", len(activeDomains))
 				for _, d := range activeDomains {
