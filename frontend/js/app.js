@@ -1314,7 +1314,7 @@ async function renderAdminSettings(container) {
         <div class="divider"></div>
 
         <!-- SMTP IP -->
-        ${inputRow('input-smtp-ip', 'SMTP 服务器公网 IP', smtpIp, '用于生成 SPF DNS 配置提示', '0.0.0.0', 'smtp_server_ip')}
+        ${inputRow('input-smtp-ip', 'SMTP 服务器公网 IP', smtpIp, '用于生成 SPF DNS 配置提示和域名 DNS 校验', '0.0.0.0', 'smtp_server_ip')}
         <div class="divider"></div>
 
         <!-- SMTP Hostname -->
