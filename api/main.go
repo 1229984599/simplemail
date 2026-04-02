@@ -105,6 +105,7 @@ func main() {
 			admin.PUT("/domains/:id/toggle", domainH.Toggle)
 			admin.POST("/domains/mx-import", domainH.MXImport)
 			admin.POST("/domains/mx-register", domainH.MXRegister)
+			admin.POST("/domains/cf-create", domainH.CFCreate)
 			admin.GET("/domains/:id/status", domainH.GetStatus)
 
 			// 系统设置管理

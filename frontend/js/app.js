@@ -118,6 +118,7 @@ const api = {
     saveSettings: body => apiFetch(API_BASE + '/admin/settings', { method: 'PUT', body: JSON.stringify(body) }),
     mxImport:    body => apiFetch(API_BASE + '/admin/domains/mx-import', { method: 'POST', body: JSON.stringify(body) }),
     mxRegister:  body => apiFetch(API_BASE + '/admin/domains/mx-register', { method: 'POST', body: JSON.stringify(body) }),
+    cfCreate:    body => apiFetch(API_BASE + '/admin/domains/cf-create', { method: 'POST', body: JSON.stringify(body) }),
     getDomainStatus: id => apiFetch(API_BASE + '/admin/domains/' + id + '/status'),
   },
 };
@@ -1261,6 +1262,7 @@ async function renderAdminSettings(container) {
   const regOpen    = settings.registration_open === 'true' || settings.registration_open === true;
   const smtpIp      = settings.smtp_server_ip       || '';
   const smtpHostname = settings.smtp_hostname         || '';
+  const cfApiToken  = settings.cf_api_token           || '';
   const siteTitle  = settings.site_title            || 'TempMail';
   const defDomain  = settings.default_domain        || '';
   const ttlMins    = settings.mailbox_ttl_minutes   || '30';
@@ -1319,6 +1321,10 @@ async function renderAdminSettings(container) {
 
         <!-- SMTP Hostname -->
         ${inputRow('input-smtp-hostname', '邮件服务器主机名', smtpHostname, '用作 MX 记录目标（如 mail.yourdomain.com）。设置后用户添加域名只需一条 MX 记录，无需额外 A 记录。', 'mail.yourdomain.com', 'smtp_hostname')}
+        <div class="divider"></div>
+
+        <!-- CF API Token -->
+        ${inputRow('input-cf-api-token', 'Cloudflare API Token', cfApiToken, '用于自动创建子域名 MX 解析。需要 Zone:DNS:Edit 权限。配置后可通过 API 或管理后台一键添加子域名。', '', 'cf_api_token')}
         <div class="divider"></div>
 
         <!-- 默认邮箱域名 -->
@@ -1654,7 +1660,81 @@ curl -s -X DELETE ${base}/api/mailboxes/$MAILBOX_ID \\
   -H "Authorization: Bearer ${key}"`,
     },
     {
-      title: '🧪 7. 完整自动化示例（Shell 脚本）',
+      title: '🌐 7. 获取域名列表',
+      desc: 'GET /api/domains — 获取所有域名（含激活和待验证），所有已登录用户可用',
+      code: `curl -s ${base}/api/domains \\
+  -H "Authorization: Bearer ${key}"
+
+# 返回示例：
+# {
+#   "domains": [
+#     {"id":1, "domain":"nightunderfly.online", "is_active":true, "status":"active"},
+#     {"id":2, "domain":"vet.nightunderfly.online", "is_active":false, "status":"pending"}
+#   ]
+# }`,
+    },
+    {
+      title: '✨ 8. 创建域名（CF 自动配置）',
+      desc: 'POST /api/admin/domains/cf-create — 通过 Cloudflare API 自动创建子域名 MX 解析。需要管理员权限，且系统设置中已配置 cf_api_token 和 smtp_hostname。',
+      code: `# 前置条件：系统设置中已配置 cf_api_token 和 smtp_hostname
+curl -s -X POST ${base}/api/admin/domains/cf-create \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"domain":"vet.nightunderfly.online"}'
+
+# 返回示例：
+# {
+#   "domain": {"id":2, "domain":"vet.nightunderfly.online", "status":"pending"},
+#   "cf_record": {"id":"xxx", "type":"MX", "name":"vet", "content":"mail.nightunderfly.online"},
+#   "zone": "nightunderfly.online",
+#   "mx_target": "mail.nightunderfly.online",
+#   "message": "已在 Cloudflare Zone nightunderfly.online 中为 vet.nightunderfly.online 创建 MX 记录"
+# }
+
+# 错误码：
+#   400 → CF Token 未配置 / 域名格式不合法 / smtp_hostname 未配置 / Zone 未找到
+#   409 → 域名已存在
+#   502 → CF API 创建 DNS 记录失败`,
+    },
+    {
+      title: '✅ 9. 启用域名',
+      desc: 'PUT /api/admin/domains/:id/toggle — 启用或禁用域名。需要管理员权限。',
+      code: `DOMAIN_ID=2
+
+# 启用域名
+curl -s -X PUT ${base}/api/admin/domains/$DOMAIN_ID/toggle \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"active":true}'
+
+# 禁用域名
+curl -s -X PUT ${base}/api/admin/domains/$DOMAIN_ID/toggle \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"active":false}'`,
+    },
+    {
+      title: '🚫 10. 禁用域名',
+      desc: 'PUT /api/admin/domains/:id/toggle — 禁用域名（同上接口，active 传 false）',
+      code: `DOMAIN_ID=2
+curl -s -X PUT ${base}/api/admin/domains/$DOMAIN_ID/toggle \\
+  -H "Authorization: Bearer ${key}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"active":false}'`,
+    },
+    {
+      title: '🔍 11. 获取域名状态',
+      desc: 'GET /api/domains/:id/status — 查询域名 MX 验证状态，所有已登录用户可用',
+      code: `DOMAIN_ID=2
+curl -s ${base}/api/domains/$DOMAIN_ID/status \\
+  -H "Authorization: Bearer ${key}"
+
+# 返回示例：
+# {"id":2, "domain":"vet.nightunderfly.online", "status":"pending", "is_active":false, "mx_checked_at":"..."}
+# status 可选值: active（已激活）| pending（待验证）| disabled（已禁用）`,
+    },
+    {
+      title: '🧪 12. 完整自动化示例（Shell 脚本）',
       desc: '创建邮箱 → 等待 5 秒 → 读取邮件 → 清理',
       code: `#!/bin/bash
 BASE="${base}"
@@ -1691,7 +1771,7 @@ curl -s -X DELETE $BASE/api/mailboxes/$MB_ID \\
 echo "✓ 邮箱已删除"`,
     },
     {
-      title: '📈 8. 并发压测示例（wrk）',
+      title: '📈 13. 并发压测示例（wrk）',
       desc: '对注册接口进行高并发压测，500 并发，持续 30 秒',
       code: `# 安装 wrk: apt install wrk
 

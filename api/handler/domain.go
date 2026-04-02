@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"tempmail/cf"
 	"tempmail/middleware"
 	"tempmail/store"
 
@@ -14,9 +15,9 @@ import (
 )
 
 type DomainHandler struct {
-	store        *store.Store
-	cfgIP        string // SMTP_SERVER_IP env
-	cfgHostname  string // SMTP_HOSTNAME env
+	store       *store.Store
+	cfgIP       string // SMTP_SERVER_IP env
+	cfgHostname string // SMTP_HOSTNAME env
 }
 
 func NewDomainHandler(s *store.Store, smtpIP, smtpHostname string) *DomainHandler {
@@ -64,13 +65,13 @@ func (h *DomainHandler) Add(c *gin.Context) {
 	var dnsRecords []gin.H
 	if hostname != "" {
 		dnsRecords = []gin.H{
-			{"type": "MX",  "host": "@", "value": hostname, "priority": 10, "description": "邮件交换记录，指向本服务器"},
+			{"type": "MX", "host": "@", "value": hostname, "priority": 10, "description": "邮件交换记录，指向本服务器"},
 			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP), "description": "SPF 记录（可选）"},
 		}
 	} else {
 		dnsRecords = []gin.H{
-			{"type": "MX",  "host": "@", "value": fmt.Sprintf("mail.%s", req.Domain), "priority": 10, "description": "邮件交换记录"},
-			{"type": "A",   "host": fmt.Sprintf("mail.%s", req.Domain), "value": serverIP, "description": "邮件服务器 A 记录"},
+			{"type": "MX", "host": "@", "value": fmt.Sprintf("mail.%s", req.Domain), "priority": 10, "description": "邮件交换记录"},
+			{"type": "A", "host": fmt.Sprintf("mail.%s", req.Domain), "value": serverIP, "description": "邮件服务器 A 记录"},
 			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP), "description": "SPF 记录（可选）"},
 		}
 	}
@@ -215,14 +216,14 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	}
 	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
 
-	serverIP  := h.getServerIP(c.Request.Context())
-	hostname  := h.getServerHostname(c.Request.Context())
+	serverIP := h.getServerIP(c.Request.Context())
+	hostname := h.getServerHostname(c.Request.Context())
 
 	// MX 目标: 优先用服务器自己的 hostname，否则用用户域名的 mail 子域
 	mxTarget := fmt.Sprintf("mail.%s", req.Domain)
 	dnsRequired := []gin.H{
 		{"type": "MX", "host": "@", "value": mxTarget, "priority": 10},
-		{"type": "A",  "host": mxTarget, "value": serverIP},
+		{"type": "A", "host": mxTarget, "value": serverIP},
 		{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
 	}
 	if hostname != "" {
@@ -310,3 +311,113 @@ func (h *DomainHandler) GetStatus(c *gin.Context) {
 	})
 }
 
+// POST /api/admin/domains/cf-create — 通过 Cloudflare API 自动创建子域名 MX 解析并加入域名池
+//
+// 请求示例: {"domain":"vet.nightunderfly.online"}
+//
+// 完整流程:
+//  1. 校验系统设置中已配置 cf_api_token（需要 Zone:DNS:Edit 权限的 CF API Token）
+//  2. 校验域名格式：至少包含两段（子域名.主域名，如 vet.nightunderfly.online）
+//  3. 读取 smtp_hostname 作为 MX 记录的目标值（如 mail.nightunderfly.online）
+//  4. 调用 CF API 根据"主域名"部分查找对应的 Zone ID
+//  5. 调用 CF API 在该 Zone 下创建 MX 记录（subdomain → smtp_hostname）
+//  6. 将域名以 pending 状态写入本地域名池，等待后台 MX 验证通过后自动激活
+//
+// 前置条件:
+//   - 系统设置中已配置 cf_api_token（Cloudflare API Token，需 Zone:DNS:Edit 权限）
+//   - 系统设置中已配置 smtp_hostname（邮件服务器主机名，作为 MX 记录目标）
+//   - 输入的域名必须使用 Cloudflare 托管的 DNS
+//
+// 错误码:
+//
+//	400 — CF Token 未配置 / 域名格式不合法 / smtp_hostname 未配置 / Zone 未找到
+//	409 — 域名已存在于本地域名池
+//	502 — CF API 创建 DNS 记录失败
+func (h *DomainHandler) CFCreate(c *gin.Context) {
+	var req struct {
+		Domain string `json:"domain" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
+
+	// 检查 CF API Token 是否已在系统设置中配置
+	cfToken, err := h.store.GetSetting(c.Request.Context(), "cf_api_token")
+	if err != nil || cfToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "未配置 Cloudflare API Token，请在系统设置中添加 cf_api_token（需要 DNS 编辑权限）",
+		})
+		return
+	}
+
+	// 校验域名至少包含两段（子域名 + 主域名），例如 vet.nightunderfly.online
+	// 单段域名（如 nightunderfly.online）不适合通过此接口创建，应使用手动 MX 配置
+	parts := strings.Split(req.Domain, ".")
+	if len(parts) < 3 {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "域名至少需要两段，如 vet.nightunderfly.online（子域名 + 主域名）",
+		})
+		return
+	}
+
+	// 读取邮件服务器主机名作为 MX 记录指向的目标（如 mail.nightunderfly.online）
+	hostname := h.getServerHostname(c.Request.Context())
+	if hostname == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "未配置邮件服务器主机名（smtp_hostname），请在系统设置中添加",
+		})
+		return
+	}
+
+	// 通过 CF API 查找域名对应的主域名 Zone
+	// 例如 vet.nightunderfly.online → 查找 nightunderfly.online 的 Zone ID
+	client := cf.NewClient(cfToken)
+	zone, err := client.FindZone(req.Domain)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "查找 Cloudflare Zone 失败: " + err.Error(),
+			"domain": req.Domain,
+		})
+		return
+	}
+
+	// 在找到的 Zone 下创建 MX 记录
+	// subdomain 是相对 Zone 的子域名部分，如 "vet"（从 vet.nightunderfly.online 去掉 .nightunderfly.online）
+	// MX 记录内容为 smtp_hostname，优先级 10，DNS only（不经过 CF 代理）
+	subdomain := strings.TrimSuffix(req.Domain, "."+zone.Name)
+	created, err := client.CreateMXRecord(zone.ID, subdomain, hostname)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error":     "创建 Cloudflare DNS 记录失败: " + err.Error(),
+			"zone":      zone.Name,
+			"subdomain": subdomain,
+			"mx_target": hostname,
+		})
+		return
+	}
+
+	// 将域名以 pending 状态加入本地域名池
+	// 后台 MX 验证器会每 30 秒检测 MX 记录，DNS 生效后自动激活
+	domain, err := h.store.AddDomainPending(c.Request.Context(), req.Domain)
+	if err != nil {
+		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
+			c.JSON(http.StatusConflict, gin.H{"error": "域名已存在"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"domain":    domain,
+		"cf_record": created,
+		"zone":      zone.Name,
+		"mx_target": hostname,
+		"message": fmt.Sprintf(
+			"已在 Cloudflare Zone %s 中为 %s 创建 MX 记录（→ %s），域名已加入验证队列",
+			zone.Name, req.Domain, hostname,
+		),
+	})
+}
