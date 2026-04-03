@@ -1719,13 +1719,13 @@ window.showCFCreateModal = function() {
       </p>
       <div class="form-group">
         <label class="form-label">基础域名</label>
-        <input class="form-input" id="cfc-base" placeholder="加载中..." readonly style="background:var(--bg-secondary)" />
-        <div class="form-hint">从系统设置 smtp_hostname 自动提取（如 mail.nightunderfly.online → nightunderfly.online）</div>
+        <input class="form-input" id="cfc-base" placeholder="加载中..." />
+        <div class="form-hint">从系统设置 smtp_hostname 自动提取，可手动修改</div>
       </div>
       <div class="form-group">
         <label class="form-label">子域名前缀</label>
-        <input class="form-input" id="cfc-prefix" placeholder="例如 vet" autofocus />
-        <div class="form-hint">最终域名 = 前缀 + . + 基础域名（如 vet.nightunderfly.online）</div>
+        <input class="form-input" id="cfc-prefix" placeholder="例如 vet 或 kvo.jsk" autofocus />
+        <div class="form-hint">最终域名 = 前缀 + . + 基础域名（如 vet.nightunderfly.online 或 kvo.jsk.nightunderfly.online）</div>
       </div>
       <div id="cfc-preview" style="background:var(--bg-secondary);border-radius:6px;padding:0.5rem 0.9rem;margin-bottom:0.7rem;font-size:0.84rem;display:none">
         预览：<code id="cfc-full" style="font-weight:600"></code>
@@ -1774,6 +1774,7 @@ window.showCFCreateModal = function() {
 
   // 实时预览：当用户输入前缀且基础域名已就绪时，显示完整域名预览并启用创建按钮
   function updatePreview() {
+    baseDomain = baseInp.value.trim();
     const prefix = prefixInp.value.trim();
     if (baseDomain && prefix) {
       previewEl.style.display = 'block';
@@ -1787,11 +1788,13 @@ window.showCFCreateModal = function() {
 
   // 输入时实时更新预览；回车直接提交
   prefixInp.addEventListener('input', updatePreview);
+  baseInp.addEventListener('input', updatePreview);
   prefixInp.addEventListener('keydown', e => { if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click(); });
 
   // 点击创建按钮 → 拼接完整域名 → 调用 cf-create API
   submitBtn.addEventListener('click', async () => {
     const prefix = prefixInp.value.trim().toLowerCase();
+    baseDomain = baseInp.value.trim();
     if (!prefix || !baseDomain) return;
     const fullDomain = prefix + '.' + baseDomain;
 

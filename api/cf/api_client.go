@@ -58,14 +58,19 @@ type cfError struct {
 
 // FindZone 根据域名查找对应的 Cloudflare Zone。
 // 例如输入 "vet.nightunderfly.online" 会查找 "nightunderfly.online" 对应的 Zone。
+// 注意：此方法通过去掉域名第一段来猜测 zone，对多级子域名不准确。
+// 推荐使用 FindZoneByName 直接指定 zone 名称。
 func (c *CFClient) FindZone(domain string) (*Zone, error) {
 	parts := strings.Split(domain, ".")
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("invalid domain: %s", domain)
 	}
-	// 从域名中提取可能的 zone name（去掉第一段）
 	zoneName := strings.Join(parts[1:], ".")
+	return c.FindZoneByName(zoneName)
+}
 
+// FindZoneByName 直接按名称查找 Cloudflare Zone。
+func (c *CFClient) FindZoneByName(zoneName string) (*Zone, error) {
 	req, _ := http.NewRequest("GET", baseURL+"/zones?name="+zoneName, nil)
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 

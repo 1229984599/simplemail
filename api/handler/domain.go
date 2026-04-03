@@ -50,6 +50,15 @@ func (h *DomainHandler) getServerHostname(ctx context.Context) string {
 	return h.cfgHostname
 }
 
+func (h *DomainHandler) getBaseDomain(ctx context.Context) string {
+	hostname := h.getServerHostname(ctx)
+	parts := strings.Split(hostname, ".")
+	if len(parts) >= 3 {
+		return strings.Join(parts[1:], ".")
+	}
+	return hostname
+}
+
 // POST /api/admin/domains - 添加域名到池（管理员）
 func (h *DomainHandler) Add(c *gin.Context) {
 	var req struct {
@@ -361,17 +370,6 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	// 校验域名至少包含两段（子域名 + 主域名），例如 vet.nightunderfly.online
-	// 单段域名（如 nightunderfly.online）不适合通过此接口创建，应使用手动 MX 配置
-	parts := strings.Split(req.Domain, ".")
-	if len(parts) < 3 {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "域名至少需要两段，如 vet.nightunderfly.online（子域名 + 主域名）",
-		})
-		return
-	}
-
-	// 读取邮件服务器主机名作为 MX 记录指向的目标（如 mail.nightunderfly.online）
 	hostname := h.getServerHostname(c.Request.Context())
 	if hostname == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -380,21 +378,19 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	// 通过 CF API 查找域名对应的主域名 Zone
-	// 例如 vet.nightunderfly.online → 查找 nightunderfly.online 的 Zone ID
+	baseDomain := h.getBaseDomain(c.Request.Context())
+
 	client := cf.NewClient(cfToken)
-	zone, err := client.FindZone(req.Domain)
+	zone, err := client.FindZoneByName(baseDomain)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "查找 Cloudflare Zone 失败: " + err.Error(),
 			"domain": req.Domain,
+			"zone":   baseDomain,
 		})
 		return
 	}
 
-	// 在找到的 Zone 下创建 MX 记录
-	// subdomain 是相对 Zone 的子域名部分，如 "vet"（从 vet.nightunderfly.online 去掉 .nightunderfly.online）
-	// MX 记录内容为 smtp_hostname，优先级 10，DNS only（不经过 CF 代理）
 	subdomain := strings.TrimSuffix(req.Domain, "."+zone.Name)
 
 	var created *cf.DNSRecord
@@ -486,9 +482,10 @@ func (h *DomainHandler) CFDelete(c *gin.Context) {
 	}
 
 	hostname := h.getServerHostname(c.Request.Context())
+	baseDomain := h.getBaseDomain(c.Request.Context())
 
 	client := cf.NewClient(cfToken)
-	zone, err := client.FindZone(domain.Domain)
+	zone, err := client.FindZoneByName(baseDomain)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "查找 Cloudflare Zone 失败: " + err.Error(), "domain": domain.Domain})
 		return
@@ -581,6 +578,7 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 	}
 
 	hostname := h.getServerHostname(c.Request.Context())
+	baseDomain := h.getBaseDomain(c.Request.Context())
 	client := cf.NewClient(cfToken)
 
 	type batchResult struct {
@@ -598,7 +596,7 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 			continue
 		}
 
-		zone, zoneErr := client.FindZone(domain.Domain)
+		zone, zoneErr := client.FindZoneByName(baseDomain)
 		if zoneErr != nil {
 			_ = h.store.DeleteDomain(c.Request.Context(), id)
 			results = append(results, batchResult{ID: id, Domain: domain.Domain, Status: "deleted_local", Error: "zone not found: " + zoneErr.Error()})
