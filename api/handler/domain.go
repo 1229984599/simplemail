@@ -407,7 +407,8 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	if existing != nil {
+	skippedCF := existing != nil
+	if skippedCF {
 		created = existing
 	} else {
 		var createErr error
@@ -423,9 +424,12 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		}
 	}
 
-	// 将域名以 pending 状态加入本地域名池
-	// 后台 MX 验证器会每 30 秒检测 MX 记录，DNS 生效后自动激活
-	domain, err := h.store.AddDomainPending(c.Request.Context(), req.Domain)
+	var domain *model.Domain
+	if skippedCF {
+		domain, err = h.store.AddDomain(c.Request.Context(), req.Domain)
+	} else {
+		domain, err = h.store.AddDomainPending(c.Request.Context(), req.Domain)
+	}
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			c.JSON(http.StatusConflict, gin.H{"error": "域名已存在"})
@@ -435,16 +439,29 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, gin.H{
-		"domain":    domain,
-		"cf_record": created,
-		"zone":      zone.Name,
-		"mx_target": hostname,
-		"message": fmt.Sprintf(
-			"已在 Cloudflare Zone %s 中为 %s 创建 MX 记录（→ %s），域名已加入验证队列",
-			zone.Name, req.Domain, hostname,
-		),
-	})
+	if skippedCF {
+		c.JSON(http.StatusCreated, gin.H{
+			"domain":    domain,
+			"cf_record": created,
+			"zone":      zone.Name,
+			"mx_target": hostname,
+			"message": fmt.Sprintf(
+				"Cloudflare Zone %s 中已存在 %s 的 MX 记录（→ %s），域名已直接激活",
+				zone.Name, req.Domain, hostname,
+			),
+		})
+	} else {
+		c.JSON(http.StatusCreated, gin.H{
+			"domain":    domain,
+			"cf_record": created,
+			"zone":      zone.Name,
+			"mx_target": hostname,
+			"message": fmt.Sprintf(
+				"已在 Cloudflare Zone %s 中为 %s 创建 MX 记录（→ %s），域名已加入验证队列",
+				zone.Name, req.Domain, hostname,
+			),
+		})
+	}
 }
 
 // DELETE /api/admin/domains/:id/cf — 通过 Cloudflare API 删除 MX 记录并从本地域名池移除
