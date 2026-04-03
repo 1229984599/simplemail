@@ -142,9 +142,12 @@ func (c *CFClient) CreateMXRecord(zoneID, subdomain, target string) (*DNSRecord,
 }
 
 // FindMXRecord searches for MX records under a zone that match the given subdomain.
+// zoneName is the full zone name (e.g. "nightunderfly.online"), subdomain is the relative
+// part (e.g. "nut"). CF API requires the full FQDN in the name parameter.
 // Returns the matching DNSRecord or nil if not found.
-func (c *CFClient) FindMXRecord(zoneID, subdomain, target string) (*DNSRecord, error) {
-	req, _ := http.NewRequest("GET", baseURL+"/zones/"+zoneID+"/dns_records?type=MX&name="+url.QueryEscape(subdomain), nil)
+func (c *CFClient) FindMXRecord(zoneID, subdomain, zoneName, target string) (*DNSRecord, error) {
+	fqdn := subdomain + "." + zoneName
+	req, _ := http.NewRequest("GET", baseURL+"/zones/"+zoneID+"/dns_records?type=MX&name="+url.QueryEscape(fqdn), nil)
 	req.Header.Set("Authorization", "Bearer "+c.Token)
 
 	resp, err := c.HTTP.Do(req)

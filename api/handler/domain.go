@@ -460,7 +460,7 @@ func (h *DomainHandler) CFDelete(c *gin.Context) {
 	}
 
 	subdomain := strings.TrimSuffix(domain.Domain, "."+zone.Name)
-	record, err := client.FindMXRecord(zone.ID, subdomain, hostname)
+	record, err := client.FindMXRecord(zone.ID, subdomain, zone.Name, hostname)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "查找 MX 记录失败: " + err.Error(), "zone": zone.Name, "subdomain": subdomain})
 		return
@@ -571,7 +571,7 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 		}
 
 		subdomain := strings.TrimSuffix(domain.Domain, "."+zone.Name)
-		record, findErr := client.FindMXRecord(zone.ID, subdomain, hostname)
+		record, findErr := client.FindMXRecord(zone.ID, subdomain, zone.Name, hostname)
 		if findErr != nil {
 			_ = h.store.DeleteDomain(c.Request.Context(), id)
 			results = append(results, batchResult{ID: id, Domain: domain.Domain, Status: "deleted_local", Error: "find MX failed: " + findErr.Error()})
