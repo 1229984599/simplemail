@@ -9,6 +9,7 @@ import (
 
 	"tempmail/cf"
 	"tempmail/middleware"
+	"tempmail/model"
 	"tempmail/store"
 
 	"github.com/gin-gonic/gin"
