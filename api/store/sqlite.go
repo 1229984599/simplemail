@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS mailboxes (
     id           TEXT PRIMARY KEY,
     account_id   TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     address      TEXT NOT NULL,
-    domain_id    INTEGER NOT NULL REFERENCES domains(id),
+    domain_id    INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
     full_address TEXT NOT NULL UNIQUE,
     created_at   DATETIME NOT NULL DEFAULT (datetime('now')),
     expires_at   DATETIME NOT NULL DEFAULT (datetime('now', '+30 minutes'))
@@ -360,6 +360,10 @@ func (s *Store) DisableDomainMX(ctx context.Context, domainID int) error {
 }
 
 func (s *Store) DeleteDomain(ctx context.Context, domainID int) error {
+	// 先删除关联的 mailboxes（emails 通过 ON DELETE CASCADE 自动级联删除）
+	if _, err := s.db.ExecContext(ctx, `DELETE FROM mailboxes WHERE domain_id = ?`, domainID); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx, `DELETE FROM domains WHERE id = ?`, domainID)
 	return err
 }

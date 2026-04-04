@@ -1268,7 +1268,7 @@ window.toggleDomain = async function(id, newActive) {
 };
 
 window.confirmDeleteDomain = function(id, name) {
-  showModal('删除域名', `<p>确定删除域名 <strong>${escHtml(name)}</strong>？</p>`, async () => {
+  showModal('删除域名', `<p>确定删除域名 <strong>${escHtml(name)}</strong>？</p><p style="font-size:0.8rem;color:var(--clr-danger);margin-top:0.5rem">⚠ 该域名下的所有邮箱及其邮件将被一并删除，此操作不可撤销。</p>`, async () => {
     try {
       await api.admin.deleteDomain(id);
       toast('域名已删除', 'success');
@@ -1313,7 +1313,7 @@ window.batchToggleDomains = async function(active) {
 window.batchDeleteDomains = async function() {
   const ids = window.getCheckedDomainIds();
   if (ids.length === 0) return;
-  showModal('批量删除', `<p>确定删除选中的 <strong>${ids.length}</strong> 个域名？<br><span style="font-size:0.8rem;color:var(--clr-danger)">此操作不可撤销。</span></p>`, async () => {
+  showModal('批量删除', `<p>确定删除选中的 <strong>${ids.length}</strong> 个域名？</p><p style="font-size:0.8rem;color:var(--clr-danger)">⚠ 各域名下的所有邮箱及其邮件将被一并删除，此操作不可撤销。</p>`, async () => {
     try {
       const r = await api.admin.batchDelete({ ids });
       toast(`已删除 ${r.deleted || ids.length} 个域名`, 'success');
@@ -1325,7 +1325,7 @@ window.batchDeleteDomains = async function() {
 window.batchCFDeleteDomains = async function() {
   const ids = window.getCheckedDomainIds();
   if (ids.length === 0) return;
-  showModal('批量 CF 删除', `<p>确定删除选中的 <strong>${ids.length}</strong> 个域名及其 Cloudflare MX DNS 记录？<br><span style="font-size:0.8rem;color:var(--clr-danger)">此操作将同时删除 CF 上的 MX 记录和本地域名，不可撤销。</span></p>`, async () => {
+  showModal('批量 CF 删除', `<p>确定删除选中的 <strong>${ids.length}</strong> 个域名及其 Cloudflare MX DNS 记录？</p><p style="font-size:0.8rem;color:var(--clr-danger)">⚠ 将同时删除 CF 上的 MX 记录、本地域名及各域名下所有邮箱和邮件，此操作不可撤销。</p>`, async () => {
     try {
       const r = await api.admin.batchCFDelete({ ids });
       const results = r.results || [];
@@ -1338,7 +1338,7 @@ window.batchCFDeleteDomains = async function() {
 };
 
 window.confirmCFDeleteDomain = function(id, name) {
-  showModal('CF 删除域名', `<p>确定删除域名 <strong>${escHtml(name)}</strong> 及其 Cloudflare MX DNS 记录？<br><span style="font-size:0.8rem;color:var(--clr-danger)">将同时删除 CF 上的 MX 记录和本地域名。</span></p>`, async () => {
+  showModal('CF 删除域名', `<p>确定删除域名 <strong>${escHtml(name)}</strong> 及其 Cloudflare MX DNS 记录？</p><p style="font-size:0.8rem;color:var(--clr-danger);margin-top:0.5rem">⚠ 将同时删除 CF 上的 MX 记录、本地域名及该域名下所有邮箱和邮件，此操作不可撤销。</p>`, async () => {
     try {
       await api.admin.cfDelete(id);
       toast('域名及 CF DNS 记录已删除', 'success');
