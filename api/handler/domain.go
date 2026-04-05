@@ -332,6 +332,7 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 	var req struct {
 		Domain   string `json:"domain" binding:"required"`
 		Hostname string `json:"hostname"`
+		Zone     string `json:"zone"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -356,13 +357,19 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	zoneName, err := cf.ExtractBaseDomain(req.Domain)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":  "域名格式不合法，至少需要子域名.主域名（如 sub.example.com）: " + err.Error(),
-			"domain": req.Domain,
-		})
-		return
+	var zoneName string
+	if req.Zone = strings.TrimSpace(req.Zone); req.Zone != "" {
+		zoneName = req.Zone
+	} else {
+		var err error
+		zoneName, err = cf.ExtractBaseDomain(req.Domain)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":  "域名格式不合法，至少需要子域名.主域名（如 sub.example.com）: " + err.Error(),
+				"domain": req.Domain,
+			})
+			return
+		}
 	}
 
 	client := cf.NewClient(cfToken)

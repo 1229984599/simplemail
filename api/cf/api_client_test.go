@@ -10,7 +10,7 @@ func TestExtractBaseDomain(t *testing.T) {
 	}{
 		{"sub.example.com", "example.com", false},
 		{"vet.nightunderfly.online", "nightunderfly.online", false},
-		{"a.b.c.d", "b.c.d", false},
+		{"a.b.c.d", "c.d", false},
 		{"example.com", "", true},
 		{"com", "", true},
 		{"", "", true},

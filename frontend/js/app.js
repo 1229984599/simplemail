@@ -1892,6 +1892,11 @@ window.showCFCreateModal = function() {
         <input class="form-input" id="cfc-hostname" placeholder="例如 mail.nightunderfly.online" />
         <div class="form-hint">MX 记录指向的目标地址（必填）</div>
       </div>
+      <div class="form-group">
+        <label class="form-label">Cloudflare Zone</label>
+        <input class="form-input" id="cfc-zone" placeholder="自动从域名提取" />
+        <div class="form-hint">CF Zone 名称，留空则自动从完整域名提取一级域名</div>
+      </div>
       <div id="cfc-status" style="display:none;margin-bottom:0.7rem"></div>
       <div class="modal-actions">
         <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">取消</button>
@@ -1905,6 +1910,7 @@ window.showCFCreateModal = function() {
   // 缓存 DOM 元素引用，避免重复查询
   const domainInp  = overlay.querySelector('#cfc-domain');
   const hostnameInp = overlay.querySelector('#cfc-hostname');
+  const zoneInp = overlay.querySelector('#cfc-zone');
   const submitBtn  = overlay.querySelector('#cfc-submit');
 
   // 输入时实时更新按钮状态
@@ -1917,13 +1923,16 @@ window.showCFCreateModal = function() {
   // 输入时实时更新；回车直接提交
   domainInp.addEventListener('input', updateSubmitBtn);
   hostnameInp.addEventListener('input', updateSubmitBtn);
-  hostnameInp.addEventListener('keydown', e => { if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click(); });
+  zoneInp.addEventListener('input', updateSubmitBtn);
   domainInp.addEventListener('keydown', e => { if (e.key === 'Enter') hostnameInp.focus(); });
+  hostnameInp.addEventListener('keydown', e => { if (e.key === 'Enter') zoneInp.focus(); });
+  zoneInp.addEventListener('keydown', e => { if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click(); });
 
   // 点击创建按钮 → 调用 cf-create API
   submitBtn.addEventListener('click', async () => {
     const fullDomain = domainInp.value.trim().toLowerCase();
     const hostname = hostnameInp.value.trim();
+    const zone = zoneInp.value.trim();
 
     if (!fullDomain || !hostname) return;
 
@@ -1940,10 +1949,12 @@ window.showCFCreateModal = function() {
       //   1. 查找 CF Zone
       //   2. 创建 MX DNS 记录
       //   3. 将域名以 pending 状态加入本地域名池
-      const r = await api.admin.cfCreate({ domain: fullDomain, hostname: hostname });
+      const body = { domain: fullDomain, hostname: hostname };
+      if (zone) body.zone = zone;
+      const r = await api.admin.cfCreate(body);
 
       // CF 创建成功 → 替换弹窗内容为成功结果页
-      const zone = r.zone || '';
+      const respZone = r.zone || '';
       const mxTarget = r.mx_target || '';
       overlay.innerHTML = `
         <div class="modal" style="text-align:center;padding:1.5rem">
@@ -1951,7 +1962,7 @@ window.showCFCreateModal = function() {
           <h3 style="margin:0.5rem 0">MX 记录已创建</h3>
           <div style="font-size:0.82rem;color:var(--text-secondary);text-align:left;margin:0.8rem 0">
             <p><b>域名：</b><code>${escHtml(fullDomain)}</code></p>
-            <p><b>Zone：</b>${escHtml(zone)}</p>
+            <p><b>Zone：</b>${escHtml(respZone)}</p>
             <p><b>MX →</b> ${escHtml(mxTarget)}</p>
           </div>
           <div style="background:var(--clr-warn-bg,#fff8e1);border:1px solid var(--clr-warn,#e6a817);border-radius:6px;padding:0.6rem 0.9rem;font-size:0.81rem;margin:0.8rem 0">

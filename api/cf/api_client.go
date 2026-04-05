@@ -63,7 +63,7 @@ func ExtractBaseDomain(fqdn string) (string, error) {
 	if len(parts) < 3 {
 		return "", fmt.Errorf("invalid domain: %s (need at least sub.example.com)", fqdn)
 	}
-	return strings.Join(parts[1:], "."), nil
+	return strings.Join(parts[len(parts)-2:], "."), nil
 }
 
 // FindZone 根据域名查找对应的 Cloudflare Zone。
