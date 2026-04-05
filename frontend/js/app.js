@@ -1192,6 +1192,22 @@ async function renderAdminDomains(container) {
             </tbody>
           </table>
         </div>
+        <div class="card" style="margin-top:0.8rem">
+          <div class="card-header"><div class="card-title">📬 主机名列表</div></div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>主机名</th></tr></thead>
+              <tbody>
+                ${(() => {
+                  const hostnames = [...new Set((domains||[]).map(d => d.hostname).filter(Boolean))];
+                  return hostnames.length === 0
+                    ? '<tr><td style="text-align:center;color:var(--text-muted)">暂无主机名</td></tr>'
+                    : hostnames.map(h => `<tr><td style="font-family:var(--font-mono)">${escHtml(h)}</td></tr>`).join('');
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </div>
   `;
