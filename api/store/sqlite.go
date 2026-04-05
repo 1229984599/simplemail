@@ -123,6 +123,12 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	// Migrate: add hostname column to domains (safe to run repeatedly)
 	db.ExecContext(ctx, migrateSQL)
 
+	// Migrate: backfill hostname from old smtp_hostname setting
+	var oldHostname string
+	if err := db.QueryRowContext(ctx, `SELECT value FROM app_settings WHERE key = 'smtp_hostname'`).Scan(&oldHostname); err == nil && oldHostname != "" {
+		db.ExecContext(ctx, `UPDATE domains SET hostname = ? WHERE hostname = ''`, oldHostname)
+	}
+
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE is_admin = 1`).Scan(&count); err != nil {
 		return nil, fmt.Errorf("check admin: %w", err)
