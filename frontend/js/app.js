@@ -899,7 +899,7 @@ async function renderDomainsGuide(container) {
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>域名</th><th>主机名</th><th>状态</th></tr>
+                <tr><th>域名</th><th>主机名</th><th style="min-width:130px">状态</th></tr>
                 <tr class="table-filter-row">
                   <td><input class="form-input domain-filter-input" id="guide-domain-filter" placeholder="正则过滤..." style="padding:0.3rem 0.6rem;font-size:0.78rem"></td>
                   <td></td>
@@ -1150,7 +1150,7 @@ async function renderAdminDomains(container) {
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th style="width:32px"></th><th>域名</th><th>主机名</th><th>状态</th><th style="min-width:200px">操作</th></tr>
+              <tr><th style="width:32px"></th><th>域名</th><th>主机名</th><th style="min-width:130px">状态</th><th style="min-width:200px">操作</th></tr>
               <tr class="table-filter-row">
                 <td></td>
                 <td><input class="form-input domain-filter-input" id="admin-domain-filter" placeholder="正则过滤..." style="padding:0.3rem 0.6rem;font-size:0.78rem"></td>
