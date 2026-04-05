@@ -120,7 +120,6 @@ const api = {
     mxRegister:  body => apiFetch(API_BASE + '/admin/domains/mx-register', { method: 'POST', body: JSON.stringify(body) }),
     cfCreate:    body => apiFetch(API_BASE + '/admin/domains/cf-create', { method: 'POST', body: JSON.stringify(body) }),
     cfDelete:        id => apiFetch(API_BASE + '/admin/domains/' + id + '/cf', { method: 'DELETE' }),
-    updateDomainHostname: (id, hostname) => apiFetch(API_BASE + '/admin/domains/' + id + '/hostname', { method: 'PUT', body: JSON.stringify({ hostname }) }),
     batchToggle:     body => apiFetch(API_BASE + '/admin/domains/batch/toggle', { method: 'PUT', body: JSON.stringify(body) }),
     batchDelete:     body => apiFetch(API_BASE + '/admin/domains/batch/delete', { method: 'PUT', body: JSON.stringify(body) }),
     batchCFDelete:   body => apiFetch(API_BASE + '/admin/domains/batch/cf-delete', { method: 'PUT', body: JSON.stringify(body) }),
@@ -1184,7 +1183,6 @@ async function renderAdminDomains(container) {
                       ? '<span class="badge badge-green">● 启用</span>'
                       : '<span class="badge badge-gray">○ 停用</span>'}</td>
                     <td style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
-                      <button class="btn btn-ghost btn-sm" onclick="showEditHostnameModal(${d.id},'${escHtml(d.domain)}','${escHtml(d.hostname||'')}')">✏ 主机名</button>
                       <button class="btn btn-ghost btn-sm" onclick="toggleDomain(${d.id},${!d.is_active})">${d.is_active ? '停用' : '启用'}</button>
                       <button class="btn btn-ghost btn-sm" onclick="confirmDeleteDomain(${d.id},'${escHtml(d.domain)}')">删除</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmCFDeleteDomain(${d.id},'${escHtml(d.domain)}')">CF删除</button>
@@ -1208,7 +1206,6 @@ async function renderAdminDomains(container) {
           ? '<span class="badge badge-green">● 启用</span>'
           : '<span class="badge badge-gray">○ 停用</span>'}</td>
         <td style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="showEditHostnameModal(${d.id},'${escHtml(d.domain)}','${escHtml(d.hostname||'')}')">✏ 主机名</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleDomain(${d.id},${!d.is_active})">${d.is_active ? '停用' : '启用'}</button>
           <button class="btn btn-ghost btn-sm" onclick="confirmDeleteDomain(${d.id},'${escHtml(d.domain)}')">删除</button>
           <button class="btn btn-danger btn-sm" onclick="confirmCFDeleteDomain(${d.id},'${escHtml(d.domain)}')">CF删除</button>
@@ -1397,52 +1394,6 @@ function showDnsInstructions(domain, result) {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); navigate('admin-domains'); }});
 }
-
-window.showEditHostnameModal = function(id, domainName, currentHostname) {
-  const old = document.querySelector('.modal-overlay');
-  if (old) old.remove();
-  const overlay = el('div', 'modal-overlay');
-  overlay.innerHTML = `
-    <div class="modal" style="max-width:420px">
-      <div class="modal-title">✏ 修改主机名</div>
-      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
-      <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.5rem 0 0.8rem">
-        域名：<strong>${escHtml(domainName)}</strong>
-      </p>
-      <div class="form-group">
-        <label class="form-label">MX 目标主机名 (hostname)</label>
-        <input class="form-input" id="edit-hostname-inp" value="${escHtml(currentHostname)}" placeholder="mail.example.com" autofocus />
-        <div class="form-hint">用作 MX 记录指向的目标地址</div>
-      </div>
-      <div class="modal-actions">
-        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">取消</button>
-        <button class="btn btn-primary" id="edit-hostname-btn">保存</button>
-      </div>
-    </div>
-  `;
-  document.body.appendChild(overlay);
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-
-  const inp = overlay.querySelector('#edit-hostname-inp');
-  inp?.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#edit-hostname-btn').click(); });
-
-  overlay.querySelector('#edit-hostname-btn').addEventListener('click', async () => {
-    const btn = overlay.querySelector('#edit-hostname-btn');
-    const hostname = inp.value.trim();
-    btn.disabled = true;
-    btn.textContent = '保存中...';
-    try {
-      await api.admin.updateDomainHostname(id, hostname);
-      toast('主机名已更新', 'success');
-      overlay.remove();
-      navigate('admin-domains');
-    } catch(e) {
-      btn.disabled = false;
-      btn.textContent = '保存';
-      toast('更新失败: ' + e.message, 'error');
-    }
-  });
-};
 
 window.toggleDomain = async function(id, newActive) {
   try {
