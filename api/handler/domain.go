@@ -39,6 +39,21 @@ func (h *DomainHandler) UpdateConfig(serverIP string) {
 	h.cfgIP = serverIP
 }
 
+func buildDNSRecords(domain, hostname, serverIP string) []gin.H {
+	if hostname != "" {
+		return []gin.H{
+			{"type": "MX", "host": "@", "value": hostname, "priority": 10},
+			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
+		}
+	}
+	mailSub := fmt.Sprintf("mail.%s", domain)
+	return []gin.H{
+		{"type": "MX", "host": "@", "value": mailSub, "priority": 10},
+		{"type": "A", "host": mailSub, "value": serverIP},
+		{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
+	}
+}
+
 // POST /api/admin/domains - 添加域名到池（管理员）
 func (h *DomainHandler) Add(c *gin.Context) {
 	var req struct {
@@ -56,24 +71,8 @@ func (h *DomainHandler) Add(c *gin.Context) {
 		return
 	}
 
-	// 获取服务器 IP（来自 DB 设置或环境变量）
 	serverIP := h.getServerIP(c.Request.Context())
-	hostname := req.Hostname
-
-	// 构建 DNS 指引
-	var dnsRecords []gin.H
-	if hostname != "" {
-		dnsRecords = []gin.H{
-			{"type": "MX", "host": "@", "value": hostname, "priority": 10, "description": "邮件交换记录，指向本服务器"},
-			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP), "description": "SPF 记录（可选）"},
-		}
-	} else {
-		dnsRecords = []gin.H{
-			{"type": "MX", "host": "@", "value": fmt.Sprintf("mail.%s", req.Domain), "priority": 10, "description": "邮件交换记录"},
-			{"type": "A", "host": fmt.Sprintf("mail.%s", req.Domain), "value": serverIP, "description": "邮件服务器 A 记录"},
-			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP), "description": "SPF 记录（可选）"},
-		}
-	}
+	dnsRecords := buildDNSRecords(req.Domain, req.Hostname, serverIP)
 
 	// 返回 DNS 配置指引
 	c.JSON(http.StatusCreated, gin.H{
@@ -159,20 +158,7 @@ func (h *DomainHandler) MXImport(c *gin.Context) {
 	matched, mxHosts, mxStatus := store.CheckDomainMX(req.Domain, serverIP)
 
 	if !matched && !req.Force {
-		var dnsHint []gin.H
-		if hostname != "" {
-			dnsHint = []gin.H{
-				{"type": "MX", "host": "@", "value": hostname, "priority": 10},
-				{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
-			}
-		} else {
-			mailSub := fmt.Sprintf("mail.%s", req.Domain)
-			dnsHint = []gin.H{
-				{"type": "MX", "host": "@", "value": mailSub, "priority": 10},
-				{"type": "A", "host": mailSub, "value": serverIP},
-				{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
-			}
-		}
+		dnsHint := buildDNSRecords(req.Domain, hostname, serverIP)
 		c.JSON(http.StatusUnprocessableEntity, gin.H{
 			"error":     "MX检测未通过，如确定要导入请加 force:true",
 			"mx_status": mxStatus,
@@ -217,22 +203,7 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
 
 	serverIP := h.getServerIP(c.Request.Context())
-	hostname := req.Hostname
-
-	// MX 目标: 优先用服务器自己的 hostname，否则用用户域名的 mail 子域
-	mxTarget := fmt.Sprintf("mail.%s", req.Domain)
-	dnsRequired := []gin.H{
-		{"type": "MX", "host": "@", "value": mxTarget, "priority": 10},
-		{"type": "A", "host": mxTarget, "value": serverIP},
-		{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
-	}
-	if hostname != "" {
-		mxTarget = hostname
-		dnsRequired = []gin.H{
-			{"type": "MX", "host": "@", "value": hostname, "priority": 10},
-			{"type": "TXT", "host": "@", "value": fmt.Sprintf("v=spf1 ip4:%s ~all", serverIP)},
-		}
-	}
+	dnsRequired := buildDNSRecords(req.Domain, req.Hostname, serverIP)
 
 	// 先尝试立即检测；通过则直接激活
 	matched, _, mxStatus := store.CheckDomainMX(req.Domain, serverIP)
