@@ -38,6 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_accounts_api_key ON accounts (api_key);
 CREATE TABLE IF NOT EXISTS domains (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     domain        TEXT NOT NULL UNIQUE,
+    hostname      TEXT NOT NULL DEFAULT '',
     is_active     INTEGER NOT NULL DEFAULT 1,
     status        TEXT NOT NULL DEFAULT 'active',
     mx_checked_at DATETIME,
@@ -83,6 +84,10 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('smtp_hostname', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('mailbox_ttl_minutes', '30');
 `
 
+var migrateSQL = `
+ALTER TABLE domains ADD COLUMN hostname TEXT NOT NULL DEFAULT '';
+`
+
 func New(ctx context.Context, dbPath string) (*Store, error) {
 	if dbPath == "" {
 		dbPath = "/data/tempmail.db"
@@ -115,6 +120,8 @@ func New(ctx context.Context, dbPath string) (*Store, error) {
 	if _, err := db.ExecContext(ctx, initSQL); err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)
 	}
+	// Migrate: add hostname column to domains (safe to run repeatedly)
+	db.ExecContext(ctx, migrateSQL)
 
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM accounts WHERE is_admin = 1`).Scan(&count); err != nil {
@@ -227,24 +234,24 @@ func (s *Store) GetAdminAPIKey(ctx context.Context) (string, error) {
 
 // ==================== Domain ====================
 
-func (s *Store) AddDomain(ctx context.Context, domain string) (*model.Domain, error) {
+func (s *Store) AddDomain(ctx context.Context, domain, hostname string) (*model.Domain, error) {
 	domain = strings.ToLower(domain)
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO domains (domain, is_active, status) VALUES (?, 1, 'active')`, domain,
+		`INSERT INTO domains (domain, hostname, is_active, status) VALUES (?, ?, 1, 'active')`, domain, hostname,
 	)
 	if err != nil {
 		return nil, err
 	}
 	id, _ := result.LastInsertId()
 	return &model.Domain{
-		ID: int(id), Domain: domain, IsActive: true, Status: "active", CreatedAt: time.Now().UTC(),
+		ID: int(id), Domain: domain, Hostname: hostname, IsActive: true, Status: "active", CreatedAt: time.Now().UTC(),
 	}, nil
 }
 
-func (s *Store) AddDomainPending(ctx context.Context, domain string) (*model.Domain, error) {
+func (s *Store) AddDomainPending(ctx context.Context, domain, hostname string) (*model.Domain, error) {
 	domain = strings.ToLower(domain)
 	result, err := s.db.ExecContext(ctx,
-		`INSERT INTO domains (domain, is_active, status) VALUES (?, 0, 'pending')`, domain,
+		`INSERT INTO domains (domain, hostname, is_active, status) VALUES (?, ?, 0, 'pending')`, domain, hostname,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") || strings.Contains(err.Error(), "duplicate") {
@@ -254,13 +261,13 @@ func (s *Store) AddDomainPending(ctx context.Context, domain string) (*model.Dom
 	}
 	id, _ := result.LastInsertId()
 	return &model.Domain{
-		ID: int(id), Domain: domain, IsActive: false, Status: "pending", CreatedAt: time.Now().UTC(),
+		ID: int(id), Domain: domain, Hostname: hostname, IsActive: false, Status: "pending", CreatedAt: time.Now().UTC(),
 	}, nil
 }
 
 func (s *Store) ListDomains(ctx context.Context) ([]model.Domain, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at FROM domains ORDER BY created_at`)
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at FROM domains ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -270,7 +277,7 @@ func (s *Store) ListDomains(ctx context.Context) ([]model.Domain, error) {
 
 func (s *Store) GetActiveDomains(ctx context.Context) ([]model.Domain, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at FROM domains WHERE is_active = 1`)
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at FROM domains WHERE is_active = 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -283,9 +290,9 @@ func (s *Store) GetRandomActiveDomain(ctx context.Context) (*model.Domain, error
 	var isActive int
 	var createdAt, mxCheckedAt sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at FROM domains
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at FROM domains
 		 WHERE is_active = 1 ORDER BY RANDOM() LIMIT 1`,
-	).Scan(&d.ID, &d.Domain, &isActive, &d.Status, &createdAt, &mxCheckedAt)
+	).Scan(&d.ID, &d.Domain, &d.Hostname, &isActive, &d.Status, &createdAt, &mxCheckedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -300,10 +307,10 @@ func (s *Store) GetDomainByName(ctx context.Context, domain string) (*model.Doma
 	var isActive int
 	var createdAt, mxCheckedAt sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at
 		 FROM domains WHERE domain = ? AND is_active = 1`,
 		strings.ToLower(domain),
-	).Scan(&d.ID, &d.Domain, &isActive, &d.Status, &createdAt, &mxCheckedAt)
+	).Scan(&d.ID, &d.Domain, &d.Hostname, &isActive, &d.Status, &createdAt, &mxCheckedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -318,9 +325,9 @@ func (s *Store) GetDomainByID(ctx context.Context, domainID int) (*model.Domain,
 	var isActive int
 	var createdAt, mxCheckedAt sql.NullString
 	err := s.db.QueryRowContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at FROM domains WHERE id = ?`,
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at FROM domains WHERE id = ?`,
 		domainID,
-	).Scan(&d.ID, &d.Domain, &isActive, &d.Status, &createdAt, &mxCheckedAt)
+	).Scan(&d.ID, &d.Domain, &d.Hostname, &isActive, &d.Status, &createdAt, &mxCheckedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -332,7 +339,7 @@ func (s *Store) GetDomainByID(ctx context.Context, domainID int) (*model.Domain,
 
 func (s *Store) ListPendingDomains(ctx context.Context) ([]model.Domain, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, domain, is_active, status, created_at, mx_checked_at
+		`SELECT id, domain, hostname, is_active, status, created_at, mx_checked_at
 		 FROM domains WHERE status = 'pending' ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -375,6 +382,12 @@ func (s *Store) ToggleDomain(ctx context.Context, domainID int, active bool) err
 	}
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE domains SET is_active = ?, status = ? WHERE id = ?`, boolToInt(active), status, domainID)
+	return err
+}
+
+func (s *Store) UpdateDomainHostname(ctx context.Context, domainID int, hostname string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE domains SET hostname = ? WHERE id = ?`, hostname, domainID)
 	return err
 }
 
@@ -683,7 +696,7 @@ func scanDomains(rows *sql.Rows) ([]model.Domain, error) {
 		var d model.Domain
 		var isActive int
 		var createdAt, mxCheckedAt sql.NullString
-		if err := rows.Scan(&d.ID, &d.Domain, &isActive, &d.Status, &createdAt, &mxCheckedAt); err != nil {
+		if err := rows.Scan(&d.ID, &d.Domain, &d.Hostname, &isActive, &d.Status, &createdAt, &mxCheckedAt); err != nil {
 			return nil, err
 		}
 		d.IsActive = isActive == 1

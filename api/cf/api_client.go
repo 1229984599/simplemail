@@ -56,6 +56,16 @@ type cfError struct {
 	Message string `json:"message"`
 }
 
+// ExtractBaseDomain strips the first DNS label from fqdn.
+// "sub.example.com" → "example.com". Errors if fewer than 2 labels.
+func ExtractBaseDomain(fqdn string) (string, error) {
+	parts := strings.Split(fqdn, ".")
+	if len(parts) < 3 {
+		return "", fmt.Errorf("invalid domain: %s (need at least sub.example.com)", fqdn)
+	}
+	return strings.Join(parts[1:], "."), nil
+}
+
 // FindZone 根据域名查找对应的 Cloudflare Zone。
 // 例如输入 "vet.nightunderfly.online" 会查找 "nightunderfly.online" 对应的 Zone。
 // 注意：此方法通过去掉域名第一段来猜测 zone，对多级子域名不准确。

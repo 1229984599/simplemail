@@ -38,12 +38,6 @@ func main() {
 			log.Printf("✓ Synced SMTP_SERVER_IP from env to DB: %s", cfg.SMTPServerIP)
 		}
 	}
-	if cfg.SMTPHostname != "" {
-		if dbHN, _ := db.GetSetting(ctx, "smtp_hostname"); dbHN != cfg.SMTPHostname {
-			_ = db.SetSetting(ctx, "smtp_hostname", cfg.SMTPHostname)
-			log.Printf("✓ Synced SMTP_HOSTNAME from env to DB: %s", cfg.SMTPHostname)
-		}
-	}
 
 	// ==================== Gin 路由 ====================
 	gin.SetMode(gin.ReleaseMode)
@@ -66,7 +60,7 @@ func main() {
 
 	// 初始化 handlers
 	accountH := handler.NewAccountHandler(db)
-	domainH := handler.NewDomainHandler(db, cfg.SMTPServerIP, cfg.SMTPHostname)
+	domainH := handler.NewDomainHandler(db, cfg.SMTPServerIP)
 	mailboxH := handler.NewMailboxHandler(db)
 	emailH := handler.NewEmailHandler(db)
 	settingH := handler.NewSettingHandler(db, domainH, cfg.EnvFilePath)
@@ -121,6 +115,7 @@ func main() {
 			admin.POST("/domains/mx-register", domainH.MXRegister)
 			admin.POST("/domains/cf-create", domainH.CFCreate)
 			admin.DELETE("/domains/:id/cf", domainH.CFDelete)
+			admin.PUT("/domains/:id/hostname", domainH.UpdateHostname)
 			admin.PUT("/domains/batch/toggle", domainH.BatchToggle)
 			admin.PUT("/domains/batch/delete", domainH.BatchDelete)
 			admin.PUT("/domains/batch/cf-delete", domainH.BatchCFDelete)

@@ -120,10 +120,12 @@ const api = {
     mxRegister:  body => apiFetch(API_BASE + '/admin/domains/mx-register', { method: 'POST', body: JSON.stringify(body) }),
     cfCreate:    body => apiFetch(API_BASE + '/admin/domains/cf-create', { method: 'POST', body: JSON.stringify(body) }),
     cfDelete:        id => apiFetch(API_BASE + '/admin/domains/' + id + '/cf', { method: 'DELETE' }),
+    updateDomainHostname: (id, hostname) => apiFetch(API_BASE + '/admin/domains/' + id + '/hostname', { method: 'PUT', body: JSON.stringify({ hostname }) }),
     batchToggle:     body => apiFetch(API_BASE + '/admin/domains/batch/toggle', { method: 'PUT', body: JSON.stringify(body) }),
     batchDelete:     body => apiFetch(API_BASE + '/admin/domains/batch/delete', { method: 'PUT', body: JSON.stringify(body) }),
     batchCFDelete:   body => apiFetch(API_BASE + '/admin/domains/batch/cf-delete', { method: 'PUT', body: JSON.stringify(body) }),
     getDomainStatus: id => apiFetch(API_BASE + '/admin/domains/' + id + '/status'),
+    updateDomainHostname: (id, hostname) => apiFetch(API_BASE + '/admin/domains/' + id + '/hostname', { method: 'PUT', body: JSON.stringify({ hostname }) }),
   },
 };
 
@@ -856,10 +858,7 @@ async function renderDomainsGuide(container) {
     api.publicSettings().catch(() => ({})),
   ]);
   const smtpIP  = pub.smtp_server_ip || '';
-  const smtpHostname = pub.smtp_hostname || '';
   const ipLabel = smtpIP || '&lt;服务器 IP&gt;';
-  const mxTarget = smtpHostname || '&lt;服务器邮件主机名&gt;';
-  const needsARec = !smtpHostname;
 
   const pending = (domains||[]).filter(d => d.status === 'pending');
   const active  = (domains||[]).filter(d => d.status !== 'pending');
@@ -876,12 +875,13 @@ async function renderDomainsGuide(container) {
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>域名</th><th>上次检测</th><th>状态</th></tr></thead>
+          <thead><tr><th>域名</th><th>主机名</th><th>上次检测</th><th>状态</th></tr></thead>
           <tbody>
             ${pending.map(d => `
-              <tr id="pending-row-${d.id}">
-                <td style="font-family:var(--font-mono);font-size:0.82rem">${escHtml(d.domain)}</td>
-                <td style="font-size:0.78rem">${d.mx_checked_at ? timeAgo(d.mx_checked_at) : '待首次检测'}</td>
+                <tr id="pending-row-${d.id}">
+                  <td style="font-family:var(--font-mono);font-size:0.82rem">${escHtml(d.domain)}</td>
+                  <td style="font-size:0.82rem;color:var(--text-muted)">${escHtml(d.hostname || '—')}</td>
+                  <td style="font-size:0.78rem">${d.mx_checked_at ? timeAgo(d.mx_checked_at) : '待首次检测'}</td>
                 <td><span class="badge badge-gold" id="pending-status-${d.id}">⏳ 检测中</span></td>
               </tr>
             `).join('')}
@@ -900,9 +900,10 @@ async function renderDomainsGuide(container) {
           <div class="table-wrap">
             <table>
               <thead>
-                <tr><th>域名</th><th>状态</th></tr>
+                <tr><th>域名</th><th>主机名</th><th>状态</th></tr>
                 <tr class="table-filter-row">
                   <td><input class="form-input domain-filter-input" id="guide-domain-filter" placeholder="正则过滤..." style="padding:0.3rem 0.6rem;font-size:0.78rem"></td>
+                  <td></td>
                   <td style="display:flex;gap:0.8rem;align-items:center">
                     <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;cursor:pointer;color:var(--text-secondary)">
                       <input type="checkbox" class="domain-cb" id="guide-filter-active" checked> 可用
@@ -915,10 +916,11 @@ async function renderDomainsGuide(container) {
               </thead>
               <tbody id="guide-domains-tbody">
                 ${active.length === 0
-                  ? `<tr><td colspan="2" style="text-align:center;color:var(--text-muted)">暂无域名</td></tr>`
+                  ? `<tr><td colspan="3" style="text-align:center;color:var(--text-muted)">暂无域名</td></tr>`
                   : active.map(d => `
                     <tr>
                       <td style="font-family:var(--font-mono);font-size:0.82rem">${escHtml(d.domain)}</td>
+                      <td style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-secondary)">${escHtml(d.hostname || '—')}</td>
                       <td>${d.is_active
                         ? '<span class="badge badge-green">● 启用</span>'
                         : '<span class="badge badge-gray">○ 停用</span>'}</td>
@@ -943,17 +945,17 @@ async function renderDomainsGuide(container) {
             </div>
             <div class="guide-step">
               <div class="step-num">2</div>
-              <div class="step-body">
-                <div class="step-title">配置 MX 记录（仅需一条）</div>
-                <div class="step-desc">在 DNS 面板添加以下记录，让 SMTP 邮件投递到本服务器：</div>
-                <table class="dns-table" style="margin-top:0.5rem">
-                  <thead><tr><th>类型</th><th>主机名</th><th>内容</th><th>优先级</th></tr></thead>
-                  <tbody>
-                    <tr><td>MX</td><td>@</td><td style="font-family:monospace">${mxTarget}</td><td>10</td></tr>
-                    ${needsARec ? `<tr><td>A</td><td style="font-family:monospace">mail.yourdomain.com</td><td style="font-family:monospace">${ipLabel}</td><td>—</td></tr>` : ''}
-                    <tr><td>TXT</td><td>@</td><td style="font-family:monospace">v=spf1 ip4:${ipLabel} ~all</td><td>—</td></tr>
-                  </tbody>
-                </table>
+                <div class="step-body">
+                 <div class="step-title">配置 MX 记录</div>
+                 <div class="step-desc">在 DNS 面板添加以下记录，让 SMTP 邮件投递到本服务器：</div>
+                 <table class="dns-table" style="margin-top:0.5rem">
+                   <thead><tr><th>类型</th><th>主机名</th><th>内容</th><th>优先级</th></tr></thead>
+                   <tbody>
+                     <tr><td>MX</td><td>@</td><td style="font-family:monospace">mail.yourdomain.com</td><td>10</td></tr>
+                     <tr><td>A</td><td style="font-family:monospace">mail.yourdomain.com</td><td style="font-family:monospace">${ipLabel}</td><td>—</td></tr>
+                     <tr><td>TXT</td><td>@</td><td style="font-family:monospace">v=spf1 ip4:${ipLabel} ~all</td><td>—</td></tr>
+                   </tbody>
+                 </table>
               </div>
             </div>
             <div class="guide-step">
@@ -991,6 +993,7 @@ async function renderDomainsGuide(container) {
     applyDomainFilter('guide-domains-tbody', _guideDomains, 'guide-domain-filter', 'guide-filter-active', 'guide-filter-disabled', d => `
       <tr>
         <td style="font-family:var(--font-mono);font-size:0.82rem">${escHtml(d.domain)}</td>
+        <td style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-secondary)">${escHtml(d.hostname || '—')}</td>
         <td>${d.is_active
           ? '<span class="badge badge-green">● 启用</span>'
           : '<span class="badge badge-gray">○ 停用</span>'}</td>
@@ -1154,10 +1157,11 @@ async function renderAdminDomains(container) {
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th style="width:32px"></th><th>域名</th><th>状态</th><th>操作</th></tr>
+              <tr><th style="width:32px"></th><th>域名</th><th>主机名</th><th>状态</th><th>操作</th></tr>
               <tr class="table-filter-row">
                 <td></td>
                 <td><input class="form-input domain-filter-input" id="admin-domain-filter" placeholder="正则过滤..." style="padding:0.3rem 0.6rem;font-size:0.78rem"></td>
+                <td></td>
                 <td style="display:flex;gap:0.8rem;align-items:center">
                   <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.78rem;cursor:pointer;color:var(--text-secondary)">
                     <input type="checkbox" class="domain-cb" id="admin-filter-active" checked> 可用
@@ -1170,15 +1174,17 @@ async function renderAdminDomains(container) {
               </tr>
             </thead>
             <tbody id="admin-domains-tbody">
-              ${active.length === 0 ? `<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">暂无域名</td></tr>` :
+              ${active.length === 0 ? `<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">暂无域名</td></tr>` :
                 active.map(d => `
                   <tr>
                     <td><input type="checkbox" class="domain-cb" data-id="${d.id}" data-domain="${escHtml(d.domain)}" onchange="updateBatchBar()"></td>
                     <td style="font-family:var(--font-mono)">${escHtml(d.domain)}</td>
+                    <td style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-secondary)">${escHtml(d.hostname || '—')}</td>
                     <td>${d.is_active
                       ? '<span class="badge badge-green">● 启用</span>'
                       : '<span class="badge badge-gray">○ 停用</span>'}</td>
                     <td style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+                      <button class="btn btn-ghost btn-sm" onclick="showEditHostnameModal(${d.id},'${escHtml(d.domain)}','${escHtml(d.hostname||'')}')">✏ 主机名</button>
                       <button class="btn btn-ghost btn-sm" onclick="toggleDomain(${d.id},${!d.is_active})">${d.is_active ? '停用' : '启用'}</button>
                       <button class="btn btn-ghost btn-sm" onclick="confirmDeleteDomain(${d.id},'${escHtml(d.domain)}')">删除</button>
                       <button class="btn btn-danger btn-sm" onclick="confirmCFDeleteDomain(${d.id},'${escHtml(d.domain)}')">CF删除</button>
@@ -1197,10 +1203,12 @@ async function renderAdminDomains(container) {
       <tr>
         <td><input type="checkbox" class="domain-cb" data-id="${d.id}" data-domain="${escHtml(d.domain)}" onchange="updateBatchBar()"></td>
         <td style="font-family:var(--font-mono)">${escHtml(d.domain)}</td>
+        <td style="font-family:var(--font-mono);font-size:0.82rem;color:var(--text-secondary)">${escHtml(d.hostname || '—')}</td>
         <td>${d.is_active
           ? '<span class="badge badge-green">● 启用</span>'
           : '<span class="badge badge-gray">○ 停用</span>'}</td>
         <td style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="showEditHostnameModal(${d.id},'${escHtml(d.domain)}','${escHtml(d.hostname||'')}')">✏ 主机名</button>
           <button class="btn btn-ghost btn-sm" onclick="toggleDomain(${d.id},${!d.is_active})">${d.is_active ? '停用' : '启用'}</button>
           <button class="btn btn-ghost btn-sm" onclick="confirmDeleteDomain(${d.id},'${escHtml(d.domain)}')">删除</button>
           <button class="btn btn-danger btn-sm" onclick="confirmCFDeleteDomain(${d.id},'${escHtml(d.domain)}')">CF删除</button>
@@ -1228,10 +1236,8 @@ window.showAddDomainModal = function() {
   if (old) old.remove();
 
   let serverIP = '';
-  let serverHostname = '';
   api.publicSettings().then(s => {
     serverIP = s.smtp_server_ip || '';
-    serverHostname = s.smtp_hostname || '';
     updateDnsHint();
   }).catch(() => {});
 
@@ -1246,6 +1252,11 @@ window.showAddDomainModal = function() {
           <label class="form-label">域名</label>
           <input class="form-input" id="add-domain-inp" placeholder="example.com" autofocus />
           <div class="form-hint">输入将用于接收邮件的顶级域名</div>
+        </div>
+        <div class="form-group" style="margin-bottom:0.5rem">
+          <label class="form-label">MX 目标主机名 (hostname)（可选）</label>
+          <input class="form-input" id="add-hostname-inp" placeholder="mail.example.com" />
+          <div class="form-hint">MX 记录指向的目标地址，留空则使用默认值</div>
         </div>
         <div id="add-dns-hint" style="background:var(--bg-secondary);border-radius:6px;padding:0.7rem 0.9rem;margin-bottom:0.8rem;font-size:0.8rem">
           <b>需要配置的 DNS 记录：</b>
@@ -1269,14 +1280,16 @@ window.showAddDomainModal = function() {
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
   const inp = overlay.querySelector('#add-domain-inp');
+  const hostnameInp = overlay.querySelector('#add-hostname-inp');
   inp?.addEventListener('keydown', e => { if (e.key === 'Enter') window.doAddDomainCheck(false); });
   inp?.addEventListener('input', updateDnsHint);
+  hostnameInp?.addEventListener('input', updateDnsHint);
 
   function updateDnsHint() {
     const d = (inp?.value || '').trim() || 'example.com';
     const ip = serverIP || '&lt;服务器IP&gt;';
-    const hn = serverHostname || 'mail.' + d;
-    const hasHostname = !!serverHostname;
+    const hn = hostnameInp?.value.trim() || 'mail.' + d;
+    const hasHostname = !!hostnameInp?.value.trim();
     const tbody = document.getElementById('add-dns-rows');
     if (!tbody) return;
     tbody.innerHTML = `
@@ -1289,6 +1302,7 @@ window.showAddDomainModal = function() {
 
   window.doAddDomainCheck = async function(force) {
     const domain = (inp?.value || '').trim().toLowerCase();
+    const hostname = (hostnameInp?.value || '').trim();
     if (!domain) { toast('请输入域名', 'warn'); return; }
     const checkBtn = document.getElementById('add-check-btn');
     const forceBtn = document.getElementById('add-force-btn');
@@ -1298,7 +1312,9 @@ window.showAddDomainModal = function() {
     try {
       if (force) {
         // 强制直接添加（跳过 MX 检测）
-        const r = await api.admin.addDomain({ domain });
+        const body = { domain };
+        if (hostname) body.hostname = hostname;
+        const r = await api.admin.addDomain(body);
         showDnsInstructions(domain, r);
         overlay.remove();
         return;
@@ -1307,7 +1323,9 @@ window.showAddDomainModal = function() {
       // 先做 MX 检测（force:false）
       let r;
       try {
-        r = await api.admin.mxImport({ domain, force: false });
+        const mxBody = { domain, force: false };
+        if (hostname) mxBody.hostname = hostname;
+        r = await api.admin.mxImport(mxBody);
         // MX 通过 → 已添加
         const step1 = document.getElementById('add-step1');
         const step2 = document.getElementById('add-step2');
@@ -1379,6 +1397,52 @@ function showDnsInstructions(domain, result) {
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) { overlay.remove(); navigate('admin-domains'); }});
 }
+
+window.showEditHostnameModal = function(id, domainName, currentHostname) {
+  const old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+  const overlay = el('div', 'modal-overlay');
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">✏ 修改主机名</div>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.5rem 0 0.8rem">
+        域名：<strong>${escHtml(domainName)}</strong>
+      </p>
+      <div class="form-group">
+        <label class="form-label">MX 目标主机名 (hostname)</label>
+        <input class="form-input" id="edit-hostname-inp" value="${escHtml(currentHostname)}" placeholder="mail.example.com" autofocus />
+        <div class="form-hint">用作 MX 记录指向的目标地址</div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" id="edit-hostname-btn">保存</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const inp = overlay.querySelector('#edit-hostname-inp');
+  inp?.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#edit-hostname-btn').click(); });
+
+  overlay.querySelector('#edit-hostname-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#edit-hostname-btn');
+    const hostname = inp.value.trim();
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+    try {
+      await api.admin.updateDomainHostname(id, hostname);
+      toast('主机名已更新', 'success');
+      overlay.remove();
+      navigate('admin-domains');
+    } catch(e) {
+      btn.disabled = false;
+      btn.textContent = '保存';
+      toast('更新失败: ' + e.message, 'error');
+    }
+  });
+};
 
 window.toggleDomain = async function(id, newActive) {
   try {
@@ -1475,7 +1539,6 @@ async function renderAdminSettings(container) {
 
   const regOpen    = settings.registration_open === 'true' || settings.registration_open === true;
   const smtpIp      = settings.smtp_server_ip       || '';
-  const smtpHostname = settings.smtp_hostname         || '';
   const cfApiToken  = settings.cf_api_token           || '';
   const siteTitle  = settings.site_title            || 'TempMail';
   const defDomain  = settings.default_domain        || '';
@@ -1533,10 +1596,6 @@ async function renderAdminSettings(container) {
         ${inputRow('input-smtp-ip', 'SMTP 服务器公网 IP', smtpIp, '用于生成 SPF DNS 配置提示和域名 DNS 校验', '0.0.0.0', 'smtp_server_ip')}
         <div class="divider"></div>
 
-        <!-- SMTP Hostname -->
-        ${inputRow('input-smtp-hostname', '邮件服务器主机名', smtpHostname, '用作 MX 记录目标（如 mail.yourdomain.com）。设置后用户添加域名只需一条 MX 记录，无需额外 A 记录。', 'mail.yourdomain.com', 'smtp_hostname')}
-        <div class="divider"></div>
-
         <!-- CF API Token -->
         <div class="form-group">
           <label class="form-label">Cloudflare API Token</label>
@@ -1566,7 +1625,6 @@ async function renderAdminSettings(container) {
           <strong>服务信息</strong>
           <p style="margin-top:0.5rem;line-height:2">
             SMTP IP:&nbsp;<code>${escHtml(smtpIp||'<未设置>')}</code><br>
-            邮件主机名:&nbsp;<code>${escHtml(smtpHostname||'<未设置>')}</code><br>
             API:&nbsp;<code>${window.location.origin}/api</code><br>
             前端:&nbsp;<code>${window.location.origin}</code>
           </p>
@@ -1689,6 +1747,11 @@ window.showMXRegisterModal = function() {
         <label class="form-label">域名（如 example.com）</label>
         <input class="form-input" id="mxr-domain" placeholder="example.com" autofocus />
       </div>
+      <div class="form-group">
+        <label class="form-label">MX 目标主机名 (hostname)（可选）</label>
+        <input class="form-input" id="mxr-hostname" placeholder="mail.example.com" />
+        <div class="form-hint">MX 记录指向的目标地址，留空则使用默认值</div>
+      </div>
       <div id="mxr-dns-hint" style="display:none;background:var(--bg-secondary);border-radius:6px;padding:0.7rem 0.9rem;margin-bottom:0.6rem;font-size:0.8rem">
         <b>请在 DNS 管理面板添加以下记录：</b>
         <table style="margin-top:0.5rem;width:100%;border-collapse:collapse;font-size:0.76rem">
@@ -1714,6 +1777,7 @@ window.showMXRegisterModal = function() {
 
   async function submitMXRegister() {
     const domain = (inp?.value || '').trim().toLowerCase();
+    const hostname = (overlay.querySelector('#mxr-hostname')?.value || '').trim();
     if (!domain) { toast('请输入域名', 'warn'); return; }
     const btn    = overlay.querySelector('#mxr-submit');
     const status = overlay.querySelector('#mxr-status');
@@ -1724,7 +1788,9 @@ window.showMXRegisterModal = function() {
 
     const domainListPage = state.account?.is_admin ? 'admin-domains' : 'domains-guide';
     try {
-      const r = await api.submitDomain({ domain }); // 任意已登录用户可用
+      const body = { domain };
+      if (hostname) body.hostname = hostname;
+      const r = await api.submitDomain(body); // 任意已登录用户可用
       if (r.status === 'active') {
         overlay.innerHTML = `
           <div class="modal" style="text-align:center;padding:2rem">
@@ -1797,23 +1863,18 @@ window.showMXRegisterModal = function() {
 //
 // 功能说明：
 //   用户在「域名列表」页点击「☁ CF自动创建子域名」按钮后弹出此弹窗。
-//   用户只需输入子域名前缀（如 "vet"），系统会自动完成以下操作：
-//     1. 从公共设置读取 smtp_hostname，推导出基础域名
-//        （例如 smtp_hostname = "mail.nightunderfly.online" → 基础域名 = "nightunderfly.online"）
-//     2. 拼接完整子域名 = 前缀 + "." + 基础域名（如 "vet.nightunderfly.online"）
-//     3. 调用后端 POST /api/admin/domains/cf-create 接口，后端会：
+//   用户输入完整域名和 MX 目标主机名，系统会自动完成以下操作：
+//     1. 调用后端 POST /api/admin/domains/cf-create 接口，后端会：
 //        a) 通过 CF API 根据"基础域名"查找对应的 Cloudflare Zone ID
-//        b) 在该 Zone 下创建 MX 记录（子域名 → smtp_hostname，优先级 10）
+//        b) 在该 Zone 下创建 MX 记录（子域名 → hostname，优先级 10）
 //        c) 将域名以 pending 状态写入本地域名池
-//     4. 后台 MX 验证器每 30 秒自动检测，DNS 生效后域名自动激活
+//     2. 后台 MX 验证器每 30 秒自动检测，DNS 生效后域名自动激活
 //
 // 前置条件：
 //   - 系统设置中已配置 cf_api_token（Cloudflare API Token，需 Zone:DNS:Edit 权限）
-//   - 系统设置中已配置 smtp_hostname（邮件服务器主机名，用作 MX 记录目标）
-//   - 基础域名的 DNS 托管在 Cloudflare 上
+//   - 域名的 DNS 托管在 Cloudflare 上
 //
 // 错误处理：
-//   - smtp_hostname 未配置 → 基础域名输入框显示提示
 //   - cf_api_token 未配置 → 后端返回 400，前端显示错误信息
 //   - CF Zone 未找到 → 后端返回 400，前端显示错误信息
 //   - CF DNS 创建失败 → 后端返回 502，前端显示错误信息
@@ -1827,30 +1888,26 @@ window.showCFCreateModal = function() {
 
   // 弹窗结构：
   //   1. 标题 + 说明文字
-  //   2. 基础域名（只读，从 smtp_hostname 自动提取）
-  //   3. 子域名前缀输入框（用户填写）
-  //   4. 实时预览完整域名（前缀 + 基础域名）
-  //   5. 状态信息区（显示错误或成功提示）
-  //   6. 操作按钮（取消 / 创建，创建按钮在输入前缀前禁用）
+  //   2. 完整域名输入框（用户填写）
+  //   3. MX 目标主机名输入框（用户填写，必填）
+  //   4. 状态信息区（显示错误或成功提示）
+  //   5. 操作按钮（取消 / 创建）
   overlay.innerHTML = `
     <div class="modal" style="max-width:520px">
       <div class="modal-title">☁ CF 自动创建子域名</div>
       <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
       <p style="font-size:0.82rem;color:var(--text-secondary);margin:0.5rem 0 0.8rem">
-        输入子域名前缀，系统将自动通过 Cloudflare API 创建 MX 记录并加入域名验证队列。
+        输入完整域名和 MX 目标主机名，系统将自动通过 Cloudflare API 创建 MX 记录并加入域名验证队列。
       </p>
       <div class="form-group">
-        <label class="form-label">基础域名</label>
-        <input class="form-input" id="cfc-base" placeholder="加载中..." />
-        <div class="form-hint">从系统设置 smtp_hostname 自动提取，可手动修改</div>
+        <label class="form-label">完整域名</label>
+        <input class="form-input" id="cfc-domain" placeholder="例如 vet.nightunderfly.online" autofocus />
+        <div class="form-hint">将用于接收邮件的完整子域名</div>
       </div>
       <div class="form-group">
-        <label class="form-label">子域名前缀</label>
-        <input class="form-input" id="cfc-prefix" placeholder="例如 vet 或 kvo.jsk" autofocus />
-        <div class="form-hint">最终域名 = 前缀 + . + 基础域名（如 vet.nightunderfly.online 或 kvo.jsk.nightunderfly.online）</div>
-      </div>
-      <div id="cfc-preview" style="background:var(--bg-secondary);border-radius:6px;padding:0.5rem 0.9rem;margin-bottom:0.7rem;font-size:0.84rem;display:none">
-        预览：<code id="cfc-full" style="font-weight:600"></code>
+        <label class="form-label">MX 目标主机名 (hostname)</label>
+        <input class="form-input" id="cfc-hostname" placeholder="例如 mail.nightunderfly.online" />
+        <div class="form-hint">MX 记录指向的目标地址（必填）</div>
       </div>
       <div id="cfc-status" style="display:none;margin-bottom:0.7rem"></div>
       <div class="modal-actions">
@@ -1863,62 +1920,29 @@ window.showCFCreateModal = function() {
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
 
   // 缓存 DOM 元素引用，避免重复查询
-  const baseInp   = overlay.querySelector('#cfc-base');
-  const prefixInp = overlay.querySelector('#cfc-prefix');
-  const previewEl = overlay.querySelector('#cfc-preview');
-  const fullEl    = overlay.querySelector('#cfc-full');
-  const submitBtn = overlay.querySelector('#cfc-submit');
+  const domainInp  = overlay.querySelector('#cfc-domain');
+  const hostnameInp = overlay.querySelector('#cfc-hostname');
+  const submitBtn  = overlay.querySelector('#cfc-submit');
 
-  // 从公共设置获取 smtp_hostname，推导基础域名
-  // 例如 smtp_hostname = "mail.nightunderfly.online"
-  //   拆分为 ["mail", "nightunderfly", "online"]
-  //   取第一段之后的部分 → "nightunderfly.online" 作为基础域名
-  // 这样用户只需输入 "vet" 即可生成完整域名 "vet.nightunderfly.online"
-  let baseDomain = '';
-  api.publicSettings().then(s => {
-    const hostname = s.smtp_hostname || '';
-    if (hostname) {
-      const parts = hostname.split('.');
-      // 至少 3 段（如 mail.xxx.xxx）才去掉第一段提取主域名
-      if (parts.length >= 3) {
-        baseDomain = parts.slice(1).join('.');
-      } else {
-        // 如果 smtp_hostname 本身就是主域名格式（如 nightunderfly.online），直接使用
-        baseDomain = hostname;
-      }
-    }
-    baseInp.value = baseDomain || '未配置 smtp_hostname';
-    baseInp.title = baseDomain ? '' : '请在系统设置中配置 smtp_hostname';
-    updatePreview();
-  }).catch(() => {
-    baseInp.value = '获取失败';
-  });
-
-  // 实时预览：当用户输入前缀且基础域名已就绪时，显示完整域名预览并启用创建按钮
-  function updatePreview() {
-    baseDomain = baseInp.value.trim();
-    const prefix = prefixInp.value.trim();
-    if (baseDomain && prefix) {
-      previewEl.style.display = 'block';
-      fullEl.textContent = prefix + '.' + baseDomain;
-      submitBtn.disabled = false;
-    } else {
-      previewEl.style.display = 'none';
-      submitBtn.disabled = true;
-    }
+  // 输入时实时更新按钮状态
+  function updateSubmitBtn() {
+    const hasDomain = domainInp.value.trim().length > 0;
+    const hasHostname = hostnameInp.value.trim().length > 0;
+    submitBtn.disabled = !(hasDomain && hasHostname);
   }
 
-  // 输入时实时更新预览；回车直接提交
-  prefixInp.addEventListener('input', updatePreview);
-  baseInp.addEventListener('input', updatePreview);
-  prefixInp.addEventListener('keydown', e => { if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click(); });
+  // 输入时实时更新；回车直接提交
+  domainInp.addEventListener('input', updateSubmitBtn);
+  hostnameInp.addEventListener('input', updateSubmitBtn);
+  hostnameInp.addEventListener('keydown', e => { if (e.key === 'Enter' && !submitBtn.disabled) submitBtn.click(); });
+  domainInp.addEventListener('keydown', e => { if (e.key === 'Enter') hostnameInp.focus(); });
 
-  // 点击创建按钮 → 拼接完整域名 → 调用 cf-create API
+  // 点击创建按钮 → 调用 cf-create API
   submitBtn.addEventListener('click', async () => {
-    const prefix = prefixInp.value.trim().toLowerCase();
-    baseDomain = baseInp.value.trim();
-    if (!prefix || !baseDomain) return;
-    const fullDomain = prefix + '.' + baseDomain;
+    const fullDomain = domainInp.value.trim().toLowerCase();
+    const hostname = hostnameInp.value.trim();
+
+    if (!fullDomain || !hostname) return;
 
     // 禁用按钮防止重复提交，显示加载状态
     submitBtn.disabled = true;
@@ -1933,7 +1957,7 @@ window.showCFCreateModal = function() {
       //   1. 查找 CF Zone
       //   2. 创建 MX DNS 记录
       //   3. 将域名以 pending 状态加入本地域名池
-      const r = await api.admin.cfCreate({ domain: fullDomain });
+      const r = await api.admin.cfCreate({ domain: fullDomain, hostname: hostname });
 
       // CF 创建成功 → 替换弹窗内容为成功结果页
       const zone = r.zone || '';

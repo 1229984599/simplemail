@@ -13,7 +13,6 @@ import (
 
 var settingToEnv = map[string]string{
 	"smtp_server_ip": "SMTP_SERVER_IP",
-	"smtp_hostname":  "SMTP_HOSTNAME",
 }
 
 type SettingHandler struct {
@@ -34,13 +33,11 @@ func (h *SettingHandler) GetPublic(c *gin.Context) {
 	}
 	siteTitle, _ := h.store.GetSetting(c.Request.Context(), "site_title")
 	smtpIP, _ := h.store.GetSetting(c.Request.Context(), "smtp_server_ip")
-	smtpHostname, _ := h.store.GetSetting(c.Request.Context(), "smtp_hostname")
 	announce, _ := h.store.GetSetting(c.Request.Context(), "announcement")
 	c.JSON(http.StatusOK, gin.H{
 		"registration_open": regOpen == "true",
 		"site_title":        siteTitle,
 		"smtp_server_ip":    smtpIP,
-		"smtp_hostname":     smtpHostname,
 		"announcement":      announce,
 	})
 }
@@ -68,7 +65,6 @@ func (h *SettingHandler) AdminUpdate(c *gin.Context) {
 		"rate_limit_enabled":     true,
 		"max_mailboxes_per_user": true,
 		"smtp_server_ip":         true,
-		"smtp_hostname":          true,
 		"site_title":             true,
 		"announcement":           true,
 		"default_domain":         true,
@@ -93,8 +89,7 @@ func (h *SettingHandler) AdminUpdate(c *gin.Context) {
 
 	if h.domainH != nil {
 		ip, _ := h.store.GetSetting(c.Request.Context(), "smtp_server_ip")
-		hn, _ := h.store.GetSetting(c.Request.Context(), "smtp_hostname")
-		h.domainH.UpdateConfig(ip, hn)
+		h.domainH.UpdateConfig(ip)
 	}
 
 	if h.envFilePath != "" && len(envUpdates) > 0 {

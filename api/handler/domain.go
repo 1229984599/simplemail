@@ -16,13 +16,12 @@ import (
 )
 
 type DomainHandler struct {
-	store       *store.Store
-	cfgIP       string // SMTP_SERVER_IP env
-	cfgHostname string // SMTP_HOSTNAME env
+	store *store.Store
+	cfgIP string // SMTP_SERVER_IP env
 }
 
-func NewDomainHandler(s *store.Store, smtpIP, smtpHostname string) *DomainHandler {
-	return &DomainHandler{store: s, cfgIP: smtpIP, cfgHostname: smtpHostname}
+func NewDomainHandler(s *store.Store, smtpIP string) *DomainHandler {
+	return &DomainHandler{store: s, cfgIP: smtpIP}
 }
 
 func (h *DomainHandler) getServerIP(ctx context.Context) string {
@@ -36,48 +35,30 @@ func (h *DomainHandler) GetServerIP() string {
 	return h.getServerIP(context.Background())
 }
 
-func (h *DomainHandler) UpdateConfig(serverIP, hostname string) {
+func (h *DomainHandler) UpdateConfig(serverIP string) {
 	h.cfgIP = serverIP
-	h.cfgHostname = hostname
-}
-
-// getServerHostname 返回 MX 记录应指向的邮件服务器 hostname
-// 优先: DB 设置 smtp_hostname → 环境变量 → 空串（傻用 mail.提交域名 方式）
-func (h *DomainHandler) getServerHostname(ctx context.Context) string {
-	if hn, err := h.store.GetSetting(ctx, "smtp_hostname"); err == nil && hn != "" {
-		return hn
-	}
-	return h.cfgHostname
-}
-
-func (h *DomainHandler) getBaseDomain(ctx context.Context) string {
-	hostname := h.getServerHostname(ctx)
-	parts := strings.Split(hostname, ".")
-	if len(parts) >= 3 {
-		return strings.Join(parts[1:], ".")
-	}
-	return hostname
 }
 
 // POST /api/admin/domains - 添加域名到池（管理员）
 func (h *DomainHandler) Add(c *gin.Context) {
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
+		Domain   string `json:"domain" binding:"required"`
+		Hostname string `json:"hostname"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	domain, err := h.store.AddDomain(c.Request.Context(), req.Domain)
+	domain, err := h.store.AddDomain(c.Request.Context(), req.Domain, req.Hostname)
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "domain already exists: " + err.Error()})
 		return
 	}
 
-	// 获取服务器 IP 和 hostname（来自 DB 设置或环境变量）
+	// 获取服务器 IP（来自 DB 设置或环境变量）
 	serverIP := h.getServerIP(c.Request.Context())
-	hostname := h.getServerHostname(c.Request.Context())
+	hostname := req.Hostname
 
 	// 构建 DNS 指引
 	var dnsRecords []gin.H
@@ -158,11 +139,12 @@ func (h *DomainHandler) Toggle(c *gin.Context) {
 }
 
 // POST /api/admin/domains/mx-import - MX快捷接入（DNS检测并自动导入）
-// body: {"domain":"example.com", "force":false}
+// body: {"domain":"example.com", "hostname":"mail.xxx.yyy", "force":false}
 func (h *DomainHandler) MXImport(c *gin.Context) {
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
-		Force  bool   `json:"force"`
+		Domain   string `json:"domain" binding:"required"`
+		Hostname string `json:"hostname"`
+		Force    bool   `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -170,9 +152,8 @@ func (h *DomainHandler) MXImport(c *gin.Context) {
 	}
 	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
 
-	// 获取服务器 IP / hostname（来自 DB 设置或环境变量，不内置硬编码）
 	serverIP := h.getServerIP(c.Request.Context())
-	hostname := h.getServerHostname(c.Request.Context())
+	hostname := req.Hostname
 
 	// DNS MX 检测
 	matched, mxHosts, mxStatus := store.CheckDomainMX(req.Domain, serverIP)
@@ -204,7 +185,7 @@ func (h *DomainHandler) MXImport(c *gin.Context) {
 	}
 
 	// 导入到域名池
-	domain, err := h.store.AddDomain(c.Request.Context(), req.Domain)
+	domain, err := h.store.AddDomain(c.Request.Context(), req.Domain, req.Hostname)
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 			c.JSON(http.StatusConflict, gin.H{"error": "域名已存在"})
@@ -223,10 +204,11 @@ func (h *DomainHandler) MXImport(c *gin.Context) {
 }
 
 // POST /api/admin/domains/mx-register - 提交域名等待自动MX验证（无需手动确认）
-// body: {"domain":"example.com"}
+// body: {"domain":"example.com", "hostname":"mail.xxx.yyy"}
 func (h *DomainHandler) MXRegister(c *gin.Context) {
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
+		Domain   string `json:"domain" binding:"required"`
+		Hostname string `json:"hostname"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -235,7 +217,7 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	req.Domain = strings.ToLower(strings.TrimSpace(req.Domain))
 
 	serverIP := h.getServerIP(c.Request.Context())
-	hostname := h.getServerHostname(c.Request.Context())
+	hostname := req.Hostname
 
 	// MX 目标: 优先用服务器自己的 hostname，否则用用户域名的 mail 子域
 	mxTarget := fmt.Sprintf("mail.%s", req.Domain)
@@ -255,7 +237,7 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	// 先尝试立即检测；通过则直接激活
 	matched, _, mxStatus := store.CheckDomainMX(req.Domain, serverIP)
 	if matched {
-		domain, err := h.store.AddDomain(c.Request.Context(), req.Domain)
+		domain, err := h.store.AddDomain(c.Request.Context(), req.Domain, req.Hostname)
 		if err != nil {
 			if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
 				// 已存在则直接返回
@@ -284,7 +266,7 @@ func (h *DomainHandler) MXRegister(c *gin.Context) {
 	}
 
 	// MX未通过 → 加入 pending，等待后台自动轮询
-	domain, err := h.store.AddDomainPending(c.Request.Context(), req.Domain)
+	domain, err := h.store.AddDomainPending(c.Request.Context(), req.Domain, req.Hostname)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -325,35 +307,60 @@ func (h *DomainHandler) GetStatus(c *gin.Context) {
 		"domain":        domain.Domain,
 		"status":        domain.Status,
 		"is_active":     domain.IsActive,
+		"hostname":      domain.Hostname,
 		"mx_checked_at": domain.MxCheckedAt,
 	})
 }
 
+// PUT /api/admin/domains/:id/hostname — 更新域名的 MX 目标主机名
+func (h *DomainHandler) UpdateHostname(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid domain id"})
+		return
+	}
+
+	var req struct {
+		Hostname string `json:"hostname" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.store.UpdateDomainHostname(c.Request.Context(), id, strings.TrimSpace(req.Hostname)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "hostname updated"})
+}
+
 // POST /api/admin/domains/cf-create — 通过 Cloudflare API 自动创建子域名 MX 解析并加入域名池
 //
-// 请求示例: {"domain":"vet.nightunderfly.online"}
+// 请求示例: {"domain":"vet.nightunderfly.online", "hostname":"mail.xxx.yyy"}
 //
 // 完整流程:
 //  1. 校验系统设置中已配置 cf_api_token（需要 Zone:DNS:Edit 权限的 CF API Token）
 //  2. 校验域名格式：至少包含两段（子域名.主域名，如 vet.nightunderfly.online）
-//  3. 读取 smtp_hostname 作为 MX 记录的目标值（如 mail.nightunderfly.online）
+//  3. 使用请求中的 hostname 作为 MX 记录的目标值
 //  4. 调用 CF API 根据"主域名"部分查找对应的 Zone ID
-//  5. 调用 CF API 在该 Zone 下创建 MX 记录（subdomain → smtp_hostname）
+//  5. 调用 CF API 在该 Zone 下创建 MX 记录（subdomain → hostname）
 //  6. 将域名以 pending 状态写入本地域名池，等待后台 MX 验证通过后自动激活
 //
 // 前置条件:
 //   - 系统设置中已配置 cf_api_token（Cloudflare API Token，需 Zone:DNS:Edit 权限）
-//   - 系统设置中已配置 smtp_hostname（邮件服务器主机名，作为 MX 记录目标）
 //   - 输入的域名必须使用 Cloudflare 托管的 DNS
 //
 // 错误码:
 //
-//	400 — CF Token 未配置 / 域名格式不合法 / smtp_hostname 未配置 / Zone 未找到
+//	400 — CF Token 未配置 / 域名格式不合法 / hostname 未提供 / Zone 未找到
 //	409 — 域名已存在于本地域名池
 //	502 — CF API 创建 DNS 记录失败
 func (h *DomainHandler) CFCreate(c *gin.Context) {
 	var req struct {
-		Domain string `json:"domain" binding:"required"`
+		Domain   string `json:"domain" binding:"required"`
+		Hostname string `json:"hostname"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -370,23 +377,30 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 		return
 	}
 
-	hostname := h.getServerHostname(c.Request.Context())
+	hostname := strings.TrimSpace(req.Hostname)
 	if hostname == "" {
 		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "未配置邮件服务器主机名（smtp_hostname），请在系统设置中添加",
+			"error": "请提供 hostname（MX 记录目标，如 mail.xxx.yyy）",
 		})
 		return
 	}
 
-	baseDomain := h.getBaseDomain(c.Request.Context())
+	zoneName, err := cf.ExtractBaseDomain(req.Domain)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "域名格式不合法，至少需要子域名.主域名（如 sub.example.com）: " + err.Error(),
+			"domain": req.Domain,
+		})
+		return
+	}
 
 	client := cf.NewClient(cfToken)
-	zone, err := client.FindZoneByName(baseDomain)
+	zone, err := client.FindZoneByName(zoneName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  "查找 Cloudflare Zone 失败: " + err.Error(),
 			"domain": req.Domain,
-			"zone":   baseDomain,
+			"zone":   zoneName,
 		})
 		return
 	}
@@ -423,9 +437,9 @@ func (h *DomainHandler) CFCreate(c *gin.Context) {
 
 	var domain *model.Domain
 	if skippedCF {
-		domain, err = h.store.AddDomain(c.Request.Context(), req.Domain)
+		domain, err = h.store.AddDomain(c.Request.Context(), req.Domain, req.Hostname)
 	} else {
-		domain, err = h.store.AddDomainPending(c.Request.Context(), req.Domain)
+		domain, err = h.store.AddDomainPending(c.Request.Context(), req.Domain, req.Hostname)
 	}
 	if err != nil {
 		if strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "unique") {
@@ -481,11 +495,16 @@ func (h *DomainHandler) CFDelete(c *gin.Context) {
 		return
 	}
 
-	hostname := h.getServerHostname(c.Request.Context())
-	baseDomain := h.getBaseDomain(c.Request.Context())
+	hostname := domain.Hostname
+
+	zoneName, err := cf.ExtractBaseDomain(domain.Domain)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "域名格式不合法: " + err.Error(), "domain": domain.Domain})
+		return
+	}
 
 	client := cf.NewClient(cfToken)
-	zone, err := client.FindZoneByName(baseDomain)
+	zone, err := client.FindZoneByName(zoneName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "查找 Cloudflare Zone 失败: " + err.Error(), "domain": domain.Domain})
 		return
@@ -577,8 +596,6 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 		return
 	}
 
-	hostname := h.getServerHostname(c.Request.Context())
-	baseDomain := h.getBaseDomain(c.Request.Context())
 	client := cf.NewClient(cfToken)
 
 	type batchResult struct {
@@ -596,7 +613,14 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 			continue
 		}
 
-		zone, zoneErr := client.FindZoneByName(baseDomain)
+		zoneName, zoneErr := cf.ExtractBaseDomain(domain.Domain)
+		if zoneErr != nil {
+			_ = h.store.DeleteDomain(c.Request.Context(), id)
+			results = append(results, batchResult{ID: id, Domain: domain.Domain, Status: "deleted_local", Error: "invalid domain: " + zoneErr.Error()})
+			continue
+		}
+
+		zone, zoneErr := client.FindZoneByName(zoneName)
 		if zoneErr != nil {
 			_ = h.store.DeleteDomain(c.Request.Context(), id)
 			results = append(results, batchResult{ID: id, Domain: domain.Domain, Status: "deleted_local", Error: "zone not found: " + zoneErr.Error()})
@@ -604,7 +628,7 @@ func (h *DomainHandler) BatchCFDelete(c *gin.Context) {
 		}
 
 		subdomain := strings.TrimSuffix(domain.Domain, "."+zone.Name)
-		record, findErr := client.FindMXRecord(zone.ID, subdomain, zone.Name, hostname)
+		record, findErr := client.FindMXRecord(zone.ID, subdomain, zone.Name, domain.Hostname)
 		if findErr != nil {
 			_ = h.store.DeleteDomain(c.Request.Context(), id)
 			results = append(results, batchResult{ID: id, Domain: domain.Domain, Status: "deleted_local", Error: "find MX failed: " + findErr.Error()})
