@@ -978,6 +978,8 @@ tr:hover td { background: rgba(184,92,56,0.04); }
   background: transparent;
   transition: border-color 0.12s ease, color 0.12s ease, background-color 0.12s ease;
   user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .filter-tag:hover { color: var(--text-secondary); }
 .filter-tag.active { border-color: var(--clr-primary); color: var(--clr-primary); background: rgba(184,92,56,0.08); }
