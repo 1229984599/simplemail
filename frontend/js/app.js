@@ -1021,6 +1021,7 @@ async function renderDomainsGuide(container) {
       </tr>
     `);
   }
+  window.refreshGuideTable = refreshGuideTable;
 
   if (guideFilterInput) guideFilterInput.addEventListener('input', refreshGuideTable);
 
@@ -1246,6 +1247,7 @@ async function renderAdminDomains(container) {
     `);
     updateBatchBar();
   }
+  window.refreshAdminTable = refreshAdminTable;
 
   const adminFilterInput = document.getElementById('admin-domain-filter');
   const adminFilterActive = document.getElementById('admin-filter-active');
