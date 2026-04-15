@@ -22,6 +22,7 @@
                 batchToggleDomains, batchDeleteDomains, batchCFDeleteDomains,
                 confirmCFDeleteDomain
    [管理员-设置] renderAdminSettings, saveSetting, saveSmtpIp, saveRegistrationSetting
+   [管理员-留存邮件] renderAdminRetainedMails, renderAdminRetainedMailView
    [域名操作]   showMXRegisterModal, showCFCreateModal
    [弹窗]       showModal
    [轮询]       clearInboxPoller, startPendingDomainPoller
@@ -43,6 +44,7 @@ const state = {
   // 当前邮箱
   currentMailbox: null,
   currentEmail:   null,
+  currentRetainedMailId: null,
   // 缓存
   mailboxes: [],
   emails:    [],
@@ -151,6 +153,8 @@ const api = {
     batchCFDelete:   body => apiFetch(API_BASE + '/admin/domains/batch/cf-delete', { method: 'PUT', body: JSON.stringify(body) }),
     getDomainStatus: id => apiFetch(API_BASE + '/admin/domains/' + id + '/status'),
     updateDomainHostname: (id, hostname) => apiFetch(API_BASE + '/admin/domains/' + id + '/hostname', { method: 'PUT', body: JSON.stringify({ hostname }) }),
+    listRetainedMails: (page=1,size=20) => apiFetch(API_BASE + '/admin/retained-mails?page=' + page + '&size=' + size),
+    getRetainedMail:  id => apiFetch(API_BASE + '/admin/retained-mails/' + id).then(d => d.retained_mail || d.mail || d),
   },
 };
 
@@ -247,7 +251,9 @@ function buildAuthPage() {
 }
 
 window.switchAuthTab = function(t) {
-  document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.auth-tab').forEach(b => {
+    b.classList.remove('active');
+  });
   if (t === 'login') {
     $('tab-login').classList.add('active');
     renderLoginForm();
@@ -366,6 +372,9 @@ function buildMainLayout() {
         <button class="nav-item" data-page="admin-settings" onclick="navigate('admin-settings')">
           <span class="nav-icon">⚙</span><span>系统设置</span>
         </button>
+        <button class="nav-item" data-page="admin-retained-mails" onclick="navigate('admin-retained-mails')">
+          <span class="nav-icon">📌</span><span>留存邮件</span>
+        </button>
         ` : ''}
       </div>
       <div class="sidebar-bottom">
@@ -440,6 +449,8 @@ async function renderPage(page) {
     'admin-accounts': ['账户管理', '创建和管理用户账户'],
     'admin-domains':  ['域名管理', '管理域名池'],
     'admin-settings': ['系统设置', ''],
+    'admin-retained-mails': ['留存邮件', '查看系统留存邮件'],
+    'admin-retained-mail-view': ['留存邮件详情', ''],
     'apikey-show':    ['API Key', ''],
     'api-docs':       ['API 接口文档', '查看所有可用 API 及调用示例'],
   };
@@ -457,6 +468,8 @@ async function renderPage(page) {
       case 'admin-accounts': await renderAdminAccounts(container); break;
       case 'admin-domains':  await renderAdminDomains(container); break;
       case 'admin-settings': await renderAdminSettings(container); break;
+      case 'admin-retained-mails': await renderAdminRetainedMails(container); break;
+      case 'admin-retained-mail-view': await renderAdminRetainedMailView(container); break;
       case 'apikey-show':    renderApiKeyShow(container); break;
       case 'api-docs':       renderApiDocs(container); break;
       default: container.innerHTML = '<div class="page"><p>页面未找到</p></div>';
@@ -1108,6 +1121,168 @@ window.confirmDeleteAccount = function(id, name) {
     } catch(e) { toast('删除失败: ' + e.message, 'error'); }
   });
 };
+
+// ─── Admin: 留存邮件 ─────────────────────────────────────────
+function normalizeRetainedMailListPayload(payload, fallbackPage = 1, fallbackSize = 20) {
+  if (Array.isArray(payload)) {
+    return {
+      data: payload,
+      page: fallbackPage,
+      size: fallbackSize,
+      total: payload.length,
+      pages: 1,
+    };
+  }
+
+  const data = payload?.data || payload?.items || payload?.retained_mails || [];
+  const page = Number(payload?.page || payload?.current_page || fallbackPage || 1);
+  const size = Number(payload?.size || payload?.page_size || fallbackSize || 20);
+  const total = Number(payload?.total || payload?.total_count || data.length || 0);
+  const pages = Math.max(1, Math.ceil((total || data.length) / Math.max(1, size)));
+
+  return { data, page, size, total, pages };
+}
+
+async function renderAdminRetainedMails(container) {
+  if (!state.account?.is_admin) { navigate('dashboard'); return; }
+
+  const page = Number(state.retainedMailPage || 1);
+  const size = 20;
+  const payload = await api.admin.listRetainedMails(page, size);
+  const normalized = normalizeRetainedMailListPayload(payload, page, size);
+  const rows = normalized.data || [];
+
+  state.retainedMailPage = normalized.page;
+
+  const actions = $('topbar-actions');
+  if (actions) {
+    actions.innerHTML = `
+      <button class="btn btn-primary btn-sm" onclick="navigate('admin-retained-mails', { retainedMailPage: ${normalized.page} })">↻ 刷新</button>
+    `;
+  }
+
+  if (!rows.length) {
+    container.innerHTML = `
+      <div class="card">
+        <div class="empty-state">
+          <span class="empty-icon">📌</span>
+          <p>暂无留存邮件</p>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const hasPrev = normalized.page > 1;
+  const hasNext = normalized.page < normalized.pages;
+
+  container.innerHTML = `
+    <div class="card" style="max-width:980px">
+      <div class="card-header">
+        <div class="card-title">📌 留存邮件列表</div>
+        <div style="font-size:0.78rem;color:var(--text-muted)">共 ${normalized.total} 封</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>收件人</th>
+              <th>发件人</th>
+              <th>主题</th>
+              <th>接收时间</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(m => {
+              const recipient = m.recipient_address || m.recipient || m.recipient_addr || m.to_addr || m.mailbox_address || '—';
+              const sender = m.sender || m.from_addr || '—';
+              const subject = m.subject || '(无主题)';
+              const retained = m.is_retained !== false;
+              return `
+                <tr class="retained-mail-row" onclick="openRetainedMail('${m.id}')">
+                  <td style="font-family:var(--font-mono);font-size:0.8rem">${escHtml(recipient)}</td>
+                  <td style="font-size:0.82rem">${escHtml(sender)}</td>
+                  <td style="font-size:0.82rem">${escHtml(subject)}</td>
+                  <td style="font-size:0.78rem;color:var(--text-muted)">${formatDate(m.received_at || m.created_at)}</td>
+                  <td>${retained ? '<span class="badge badge-retained">已留存</span>' : '<span class="badge badge-gray">—</span>'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="card-body" style="display:flex;justify-content:flex-end;gap:0.5rem;padding-top:0.8rem">
+        <button class="btn btn-ghost btn-sm" ${hasPrev ? '' : 'disabled'} onclick="navigate('admin-retained-mails', { retainedMailPage: ${normalized.page - 1} })">← 上一页</button>
+        <button class="btn btn-ghost btn-sm" disabled>第 ${normalized.page} / ${normalized.pages} 页</button>
+        <button class="btn btn-ghost btn-sm" ${hasNext ? '' : 'disabled'} onclick="navigate('admin-retained-mails', { retainedMailPage: ${normalized.page + 1} })">下一页 →</button>
+      </div>
+    </div>
+  `;
+}
+
+window.openRetainedMail = function(id) {
+  state.currentRetainedMailId = id;
+  navigate('admin-retained-mail-view');
+};
+
+async function renderAdminRetainedMailView(container) {
+  if (!state.account?.is_admin) { navigate('dashboard'); return; }
+
+  const id = state.currentRetainedMailId;
+  if (!id) { navigate('admin-retained-mails'); return; }
+
+  const actions = $('topbar-actions');
+  if (actions) {
+    actions.innerHTML = `
+      <button class="btn btn-ghost btn-sm" onclick="navigate('admin-retained-mails', { retainedMailPage: ${state.retainedMailPage || 1} })">← 返回列表</button>
+    `;
+  }
+
+  const m = await api.admin.getRetainedMail(id);
+  const recipient = m.recipient_address || m.recipient || m.recipient_addr || m.to_addr || m.mailbox_address || '—';
+  const fromAddr = m.sender || m.from_addr || '—';
+  const htmlBody = m.body_html || m.html_body || '';
+  const textBody = m.body_text || m.text_body || '';
+
+  const title = $('topbar-title'); if (title) title.textContent = m.subject || '(无主题)';
+  const sub = $('topbar-subtitle'); if (sub) sub.textContent = `收件人：${recipient}`;
+
+  container.innerHTML = `
+    <div class="card" style="padding:0;max-width:900px">
+      <div class="email-detail-header">
+        <div class="email-subject-big">${escHtml(m.subject || '(无主题)')}</div>
+        <div class="email-info-row">
+          <span>状态：<span class="badge badge-retained">已留存</span></span>
+          <span style="margin:0 0.3rem">·</span>
+          <span>发件人：<strong>${escHtml(fromAddr)}</strong></span>
+          <span style="margin:0 0.3rem">·</span>
+          <span>收件人：<strong>${escHtml(recipient)}</strong></span>
+          <span style="margin:0 0.3rem">·</span>
+          <span>${formatDate(m.received_at || m.created_at)}</span>
+        </div>
+      </div>
+      ${htmlBody
+        ? '<iframe class="email-body-frame" id="retained-email-frame" sandbox="allow-same-origin allow-popups"></iframe>'
+        : `<div class="email-body-text" style="white-space:pre-wrap">${escHtml(textBody || '(邮件内容为空)')}</div>`
+      }
+    </div>
+  `;
+
+  if (htmlBody) {
+    const frame = container.querySelector('#retained-email-frame');
+    if (frame) {
+      frame.contentDocument.open();
+      frame.contentDocument.write(htmlBody);
+      frame.contentDocument.close();
+      const setHeight = () => {
+        try { frame.style.height = frame.contentDocument.body.scrollHeight + 20 + 'px'; } catch (_) {}
+      };
+      frame.addEventListener('load', setHeight);
+      setTimeout(setHeight, 300);
+    }
+  }
+}
 
 // ─── Admin: 域名管理 ─────────────────────────────────────────
 async function renderAdminDomains(container) {
