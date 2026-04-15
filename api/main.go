@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"log"
 	"net/http"
 	"os"
@@ -63,6 +64,7 @@ func main() {
 	domainH := handler.NewDomainHandler(db, cfg.SMTPServerIP)
 	mailboxH := handler.NewMailboxHandler(db)
 	emailH := handler.NewEmailHandler(db)
+	retainedMailH := handler.NewRetainedMailHandler(db)
 	settingH := handler.NewSettingHandler(db, domainH, cfg.EnvFilePath)
 	registerH := handler.NewRegisterHandler(db)
 	statsH := handler.NewStatsHandler(db)
@@ -124,6 +126,8 @@ func main() {
 			// 系统设置管理
 			admin.GET("/settings", settingH.AdminGetAll)
 			admin.PUT("/settings", settingH.AdminUpdate)
+			admin.GET("/retained-mails", retainedMailH.List)
+			admin.GET("/retained-mails/:id", retainedMailH.Get)
 		}
 	}
 
@@ -164,8 +168,26 @@ func main() {
 			// 查找收件邮箱
 			mailbox, err := db.GetMailboxByFullAddress(c.Request.Context(), req.Recipient)
 			if err != nil {
-				// 邮箱不存在，静默丢弃
-				c.JSON(http.StatusOK, gin.H{"status": "discarded", "reason": "unknown recipient"})
+				if err != sql.ErrNoRows {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+
+				retainedMail, retainErr := db.InsertRetainedMail(
+					c.Request.Context(),
+					req.Recipient,
+					req.Sender,
+					req.Subject,
+					req.BodyText,
+					req.BodyHTML,
+					req.Raw,
+				)
+				if retainErr != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": retainErr.Error()})
+					return
+				}
+
+				c.JSON(http.StatusOK, gin.H{"status": "retained", "retained_mail_id": retainedMail.ID})
 				return
 			}
 
