@@ -130,6 +130,7 @@ const api = {
   createMailbox:   (body) => apiFetch(API_BASE + '/mailboxes', { method: 'POST', body: JSON.stringify(body || {}) }).then(d => d.mailbox || d),
   listMailboxes:   () => apiFetch(API_BASE + '/mailboxes').then(d => Array.isArray(d) ? d : (d.data || [])),
   deleteMailbox: id  => apiFetch(API_BASE + '/mailboxes/' + id, { method: 'DELETE' }),
+  renewMailbox: (id, body) => apiFetch(API_BASE + '/mailboxes/' + id + '/renew', { method: 'PUT', body: JSON.stringify(body || {}) }).then(d => d.mailbox || d),
   // 邮件 → 解包 {data:[...]}
   listEmails: mid    => apiFetch(API_BASE + '/mailboxes/' + mid + '/emails').then(d => Array.isArray(d) ? d : (d.data || [])),
   getEmail:   (mid, eid) => apiFetch(API_BASE + '/mailboxes/' + mid + '/emails/' + eid).then(d => d.email || d),
@@ -552,10 +553,12 @@ function buildMailboxCard(mb) {
   const expiresAt = mb.expires_at ? new Date(mb.expires_at) : null;
   const now = new Date();
   let expiryHtml = '';
+  let renewAction = '';
   if (expiresAt) {
     const diffMs = expiresAt - now;
     if (diffMs <= 0) {
       expiryHtml = '<span style="color:var(--clr-danger);font-size:0.75rem">⏱ 已过期</span>';
+      renewAction = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();showRenewMailboxModal('${mb.id}','${escHtml(mb.full_address)}')">⟳ 续期</button>`;
     } else {
       const mins = Math.ceil(diffMs / 60000);
       const color = mins <= 5 ? 'var(--clr-danger)' : mins <= 15 ? 'var(--clr-warn,#e6a817)' : 'var(--text-muted)';
@@ -570,6 +573,7 @@ function buildMailboxCard(mb) {
         ${expiryHtml}
       </div>
       <div class="mailbox-actions">
+        ${renewAction}
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openInbox('${mb.id}','${escHtml(mb.full_address)}')">📬 查看邮件</button>
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();copyText('${escHtml(mb.full_address)}')" title="复制地址">⎘</button>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();confirmDeleteMailbox('${mb.id}','${escHtml(mb.full_address)}')">✕</button>
@@ -661,6 +665,56 @@ window.confirmDeleteMailbox = function(id, addr) {
       } catch(e) { toast('删除失败: ' + e.message, 'error'); }
     }
   );
+};
+
+window.showRenewMailboxModal = function(id, addr) {
+  const old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+
+  const overlay = el('div', 'modal-overlay');
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <div class="modal-title">⟳ 邮箱续期</div>
+      <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
+      <p style="font-size:0.84rem;color:var(--text-secondary);margin:0.2rem 0 0.9rem">
+        <strong>${escHtml(addr)}</strong> 已过期。请选择新的保留时长，续期后会立即恢复收件。
+      </p>
+      <div class="form-group">
+        <label class="form-label">续期时长</label>
+        <select class="form-input" id="mb-renew-duration">
+          <option value="15">15 分钟</option>
+          <option value="30" selected>30 分钟</option>
+          <option value="60">1 小时</option>
+          <option value="180">3 小时</option>
+          <option value="360">6 小时</option>
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="this.closest('.modal-overlay').remove()">取消</button>
+        <button class="btn btn-primary" id="mb-renew-confirm-btn">确认续期</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  overlay.querySelector('#mb-renew-confirm-btn').addEventListener('click', async () => {
+    const btn = overlay.querySelector('#mb-renew-confirm-btn');
+    const minutes = Number(overlay.querySelector('#mb-renew-duration').value);
+    btn.disabled = true;
+    btn.textContent = '续期中...';
+
+    try {
+      const mailbox = await api.renewMailbox(id, { minutes });
+      overlay.remove();
+      toast(`已续期 ${minutes} 分钟：${mailbox.full_address}`, 'success');
+      navigate('dashboard');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = '确认续期';
+      toast('续期失败：' + e.message, 'error');
+    }
+  });
 };
 
 // ─── API Key 展示 ──────────────────────────────────────────
