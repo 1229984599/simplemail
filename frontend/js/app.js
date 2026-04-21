@@ -90,10 +90,34 @@ function timeAgo(s) {
 
 async function copyText(text) {
   try {
-    await navigator.clipboard.writeText(text);
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      throw new Error('clipboard api unavailable');
+    }
     toast('已复制到剪贴板', 'success');
   } catch {
-    toast('复制失败，请手动选择', 'warn');
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', 'readonly');
+      ta.style.position = 'fixed';
+      ta.style.top = '-9999px';
+      ta.style.left = '-9999px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, ta.value.length);
+
+      const ok = document.execCommand('copy');
+      ta.remove();
+
+      if (!ok) throw new Error('execCommand failed');
+      toast('已复制到剪贴板', 'success');
+    } catch {
+      toast('复制失败，请手动选择', 'warn');
+    }
   }
 }
 
