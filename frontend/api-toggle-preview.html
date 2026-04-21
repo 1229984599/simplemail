@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API 文档切换按钮预览</title>
+  <style>
+    :root {
+      --clr-primary: #B85C38;
+      --clr-primary-dark: #8E3E22;
+      --clr-accent: #C8963E;
+      --clr-jade: #3A7D44;
+      --clr-danger: #C0392B;
+      --bg: #F5EDE0;
+      --bg-card: #FDFAF5;
+      --bg-soft: #F9F2E8;
+      --text: #2C1810;
+      --text-secondary: #6B4226;
+      --text-muted: #9E7A5A;
+      --border: #D9C4A8;
+      --border-light: #EDE0CE;
+      --shadow: rgba(44, 24, 16, 0.12);
+      --radius: 14px;
+      --radius-sm: 10px;
+      --font-sans: 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', 'Courier New', monospace;
+      --transition: 0.22s ease;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(circle at top right, rgba(184, 92, 56, 0.12), transparent 28%),
+        radial-gradient(circle at bottom left, rgba(58, 125, 68, 0.10), transparent 24%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1360px;
+      margin: 0 auto;
+      padding: 40px 24px 64px;
+    }
+
+    .hero {
+      margin-bottom: 28px;
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: end;
+      flex-wrap: wrap;
+    }
+
+    .hero h1 {
+      margin: 0 0 10px;
+      font-size: 32px;
+      line-height: 1.2;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 820px;
+      color: var(--text-secondary);
+      line-height: 1.75;
+      font-size: 14px;
+    }
+
+    .legend {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .legend-chip {
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(184, 92, 56, 0.09);
+      color: var(--clr-primary-dark);
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid rgba(184, 92, 56, 0.18);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .variant-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 14px 40px var(--shadow);
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .variant-head {
+      padding: 20px 20px 16px;
+      border-bottom: 1px solid var(--border-light);
+      background: linear-gradient(180deg, rgba(255,255,255,0.56), transparent);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--clr-primary);
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .variant-head h2 {
+      margin: 0 0 8px;
+      font-size: 19px;
+    }
+
+    .variant-head p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+
+    .demo-shell {
+      padding: 18px;
+    }
+
+    .api-card {
+      border: 1px solid var(--border-light);
+      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(253,250,245,0.96), rgba(250,244,236,0.96));
+      overflow: hidden;
+    }
+
+    .api-card-header {
+      padding: 16px 18px 12px;
+    }
+
+    .api-title-wrap {
+      width: 100%;
+      min-width: 0;
+    }
+
+    .api-title-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .api-title {
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0;
+      min-width: 0;
+      line-height: 1.35;
+    }
+
+    .api-desc {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+
+    .code-area {
+      margin: 0 18px 18px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.55);
+      position: relative;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px 18px 18px;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.8;
+      overflow-x: auto;
+    }
+
+    .copy-btn {
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.72);
+      color: var(--text-secondary);
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: var(--transition);
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 1;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      opacity: 0;
+      transform: translateY(-4px) scale(0.96);
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.24s ease, background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease;
+    }
+    .code-area:hover .copy-btn,
+    .code-area:focus-within .copy-btn,
+    .code-area.reveal-copy .copy-btn {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      pointer-events: auto;
+    }
+    .copy-btn:hover { background: #fff; }
+    .copy-btn svg {
+      width: 14px;
+      height: 14px;
+      display: block;
+      fill: currentColor;
+    }
+
+    .toggle-group {
+      display: inline-flex;
+      align-items: center;
+      margin-left: auto;
+      flex-shrink: 0;
+    }
+
+    .toggle-v1 {
+      padding: 3px;
+      background: rgba(184, 92, 56, 0.10);
+      border: 1px solid rgba(184, 92, 56, 0.18);
+      border-radius: 999px;
+      gap: 3px;
+    }
+
+    .toggle-v1 .toggle-btn,
+    .toggle-v2 .toggle-btn,
+    .toggle-v3 .toggle-btn,
+    .toggle-v4 .toggle-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      cursor: pointer;
+      font: inherit;
+      transition: var(--transition);
+    }
+
+    .toggle-v1 .toggle-btn {
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-secondary);
+    }
+
+    .toggle-v1 .toggle-btn.active {
+      background: linear-gradient(135deg, var(--clr-primary), var(--clr-accent));
+      color: #fff;
+      box-shadow: 0 6px 16px rgba(184, 92, 56, 0.28);
+    }
+
+    .toggle-v2 {
+      gap: 16px;
+      position: relative;
+    }
+    .toggle-v2 .toggle-btn {
+      padding: 4px 0 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      position: relative;
+    }
+    .toggle-v2 .toggle-btn.active {
+      color: var(--clr-primary-dark);
+    }
+    .toggle-v2 .toggle-btn.active::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 3px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--clr-primary), var(--clr-accent));
+    }
+
+    .toggle-v3 {
+      padding: 3px;
+      gap: 4px;
+      background: rgba(44, 24, 16, 0.04);
+      border-radius: 10px;
+      border: 1px solid var(--border-light);
+    }
+    .toggle-v3 .toggle-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .toggle-v3 .toggle-btn .icon {
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(184,92,56,0.10);
+      color: var(--clr-primary);
+      position: relative;
+      overflow: hidden;
+    }
+    .toggle-v3 .toggle-btn .icon-python::before,
+    .toggle-v3 .toggle-btn .icon-python::after {
+      content: '';
+      position: absolute;
+      width: 8px;
+      height: 5px;
+      border-radius: 3px;
+    }
+    .toggle-v3 .toggle-btn .icon-python::before {
+      left: 2px;
+      top: 2px;
+      background: #3776AB;
+      box-shadow: 3px 1px 0 #3776AB;
+    }
+    .toggle-v3 .toggle-btn .icon-python::after {
+      right: 2px;
+      bottom: 2px;
+      background: #FFD343;
+      box-shadow: -3px -1px 0 #FFD343;
+    }
+    .toggle-v3 .toggle-btn .icon-python i,
+    .toggle-v3 .toggle-btn .icon-bash i {
+      position: absolute;
+      display: block;
+      z-index: 1;
+    }
+    .toggle-v3 .toggle-btn .icon-python i {
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: #fff;
+      top: 4px;
+      right: 5px;
+      box-shadow: -4px 4px 0 #fff;
+    }
+    .toggle-v3 .toggle-btn .icon-bash {
+      background: rgba(44,24,16,0.10);
+    }
+    .toggle-v3 .toggle-btn .icon-bash::before {
+      content: '';
+      position: absolute;
+      inset: 2px;
+      border-radius: 4px;
+      background: #2C1810;
+    }
+    .toggle-v3 .toggle-btn .icon-bash i:first-child {
+      width: 4px;
+      height: 4px;
+      left: 4px;
+      top: 4px;
+      border-top: 1.5px solid #F8EEDF;
+      border-right: 1.5px solid #F8EEDF;
+      transform: rotate(45deg);
+    }
+    .toggle-v3 .toggle-btn .icon-bash i:last-child {
+      width: 3px;
+      height: 1.5px;
+      right: 4px;
+      top: 7px;
+      background: #F8EEDF;
+      border-radius: 2px;
+    }
+    .toggle-v3 .toggle-btn.active {
+      background: #fff;
+      color: var(--clr-primary-dark);
+      box-shadow: 0 6px 18px rgba(44,24,16,0.08);
+    }
+
+    .toggle-v4 {
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid rgba(44,24,16,0.08);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.7);
+    }
+    .toggle-v4 .toggle-btn {
+      padding: 8px 12px;
+      min-width: 64px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(246,236,225,0.94));
+      color: var(--text-secondary);
+      font-size: 11px;
+      font-weight: 700;
+      border-right: 1px solid rgba(44,24,16,0.08);
+    }
+    .toggle-v4 .toggle-btn:last-child { border-right: none; }
+    .toggle-v4 .toggle-btn.active {
+      background: linear-gradient(180deg, rgba(58,125,68,0.94), rgba(49,108,59,0.94));
+      color: #fff;
+    }
+
+    .note {
+      margin-top: 14px;
+      padding: 12px 14px;
+      font-size: 12px;
+      color: var(--text-secondary);
+      border-radius: 12px;
+      background: var(--bg-soft);
+      border: 1px dashed var(--border);
+      line-height: 1.7;
+    }
+
+    .recommended {
+      color: var(--clr-jade);
+      font-weight: 700;
+    }
+
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 600px) {
+      .page { padding: 24px 14px 40px; }
+      .hero h1 { font-size: 26px; }
+      .api-card-header { padding: 14px; }
+      .code-area { margin: 0 14px 14px; }
+      .toggle-v2 { gap: 12px; }
+      .toggle-v3 .toggle-btn span:last-child { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h1>API 文档代码块切换按钮预览</h1>
+        <p>这个单文件原型只演示“每个 API 卡片右上角增加 <b>curl / python</b> 切换”的交互样式，不接入现有业务。每张卡片都展示同一组接口内容，但切换控件风格不同，方便你先挑视觉方向。</p>
+      </div>
+      <div class="legend">
+        <span class="legend-chip">单文件 HTML</span>
+        <span class="legend-chip">4 种按钮版本</span>
+        <span class="legend-chip">可直接本地预览</span>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="variant-card" data-variant>
+        <div class="variant-head">
+          <div class="eyebrow">Version A · Segmented Pills</div>
+          <h2>胶囊分段切换</h2>
+          <p>最稳妥，和当前系统按钮风格最接近，识别成本低，适合直接落到现有 API 文档页。<span class="recommended">推荐优先</span></p>
+        </div>
+        <div class="demo-shell">
+          <div class="api-card" data-code-card>
+            <div class="api-card-header">
+              <div class="api-title-wrap">
+                <div class="api-title-row">
+                  <div class="api-title">📌 获取留存邮件列表（Admin）</div>
+                  <div class="toggle-group toggle-v1" data-toggle>
+                    <button class="toggle-btn active" data-lang="curl">curl</button>
+                    <button class="toggle-btn" data-lang="python">python</button>
+                  </div>
+                </div>
+                <p class="api-desc">GET /api/admin/retained-mails — 仅管理员可调用，分页查看系统留存邮件列表。</p>
+              </div>
+            </div>
+            <div class="code-area">
+              <button class="copy-btn" data-copy-btn aria-label="复制代码" title="复制代码">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8 3a2 2 0 0 0-2 2v1H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8zm0 2h9v11h-1V8a2 2 0 0 0-2-2H8V5zm-3 3h9v11H5V8z"/>
+                </svg>
+              </button>
+              <pre data-code-block></pre>
+            </div>
+          </div>
+          <div class="note">特点：视觉稳定、命中区域大、移动端也好用。缺点是会稍微占一点横向空间。</div>
+        </div>
+      </article>
+
+      <article class="variant-card" data-variant>
+        <div class="variant-head">
+          <div class="eyebrow">Version B · Underline Tabs</div>
+          <h2>轻量下划线标签</h2>
+          <p>更像文档站，视觉更轻，适合想让代码块本身成为主角、按钮存在感更低的场景。</p>
+        </div>
+        <div class="demo-shell">
+          <div class="api-card" data-code-card>
+            <div class="api-card-header">
+              <div class="api-title-wrap">
+                <div class="api-title-row">
+                  <div class="api-title">⟳ 续期已过期邮箱</div>
+                  <div class="toggle-group toggle-v2" data-toggle>
+                    <button class="toggle-btn active" data-lang="curl">curl</button>
+                    <button class="toggle-btn" data-lang="python">python</button>
+                  </div>
+                </div>
+                <p class="api-desc">PUT /api/mailboxes/:id/renew — 仅对已过期邮箱生效，minutes 单位为分钟。</p>
+              </div>
+            </div>
+            <div class="code-area">
+              <button class="copy-btn" data-copy-btn aria-label="复制代码" title="复制代码">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8 3a2 2 0 0 0-2 2v1H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8zm0 2h9v11h-1V8a2 2 0 0 0-2-2H8V5zm-3 3h9v11H5V8z"/>
+                </svg>
+              </button>
+              <pre data-code-block></pre>
+            </div>
+          </div>
+          <div class="note">特点：最像 API 文档产品，界面清爽。缺点是激活态没有胶囊那么显眼。</div>
+        </div>
+      </article>
+
+      <article class="variant-card" data-variant>
+        <div class="variant-head">
+          <div class="eyebrow">Version C · Icon Chips</div>
+          <h2>图标标签切换</h2>
+          <p>信息密度更高，切换按钮更像“语言卡片”；如果你想让 python 示例更有“高级选项”的感觉，这版会比较讨喜。</p>
+        </div>
+        <div class="demo-shell">
+          <div class="api-card" data-code-card>
+            <div class="api-card-header">
+              <div class="api-title-wrap">
+                <div class="api-title-row">
+                  <div class="api-title">📬 创建临时邮箱</div>
+                  <div class="toggle-group toggle-v3" data-toggle>
+                <button class="toggle-btn active" data-lang="curl"><span class="icon icon-bash"><i></i><i></i></span><span>curl</span></button>
+                <button class="toggle-btn" data-lang="python"><span class="icon icon-python"><i></i></span><span>python</span></button>
+                  </div>
+                </div>
+                <p class="api-desc">POST /api/mailboxes — 支持随机地址、随机域名或手动指定 address / domain。</p>
+              </div>
+            </div>
+            <div class="code-area">
+              <button class="copy-btn" data-copy-btn aria-label="复制代码" title="复制代码">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8 3a2 2 0 0 0-2 2v1H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8zm0 2h9v11h-1V8a2 2 0 0 0-2-2H8V5zm-3 3h9v11H5V8z"/>
+                </svg>
+              </button>
+              <pre data-code-block></pre>
+            </div>
+          </div>
+          <div class="note">特点：辨识度强，适合后续扩展到 curl / python / javascript 三种语言。缺点是视觉稍活泼。</div>
+        </div>
+      </article>
+
+      <article class="variant-card" data-variant>
+        <div class="variant-head">
+          <div class="eyebrow">Version D · Hard Split</div>
+          <h2>硬切换双按钮</h2>
+          <p>更像运维面板或管理后台，按钮对比更强，适合希望“当前代码语言”一眼可见的场景。</p>
+        </div>
+        <div class="demo-shell">
+          <div class="api-card" data-code-card>
+            <div class="api-card-header">
+              <div class="api-title-wrap">
+                <div class="api-title-row">
+                  <div class="api-title">📌 获取留存邮件详情（Admin）</div>
+                  <div class="toggle-group toggle-v4" data-toggle>
+                    <button class="toggle-btn active" data-lang="curl">curl</button>
+                    <button class="toggle-btn" data-lang="python">python</button>
+                  </div>
+                </div>
+                <p class="api-desc">GET /api/admin/retained-mails/:id — 仅管理员可调用，查看单封留存邮件完整内容。</p>
+              </div>
+            </div>
+            <div class="code-area">
+              <button class="copy-btn" data-copy-btn aria-label="复制代码" title="复制代码">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M8 3a2 2 0 0 0-2 2v1H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H8zm0 2h9v11h-1V8a2 2 0 0 0-2-2H8V5zm-3 3h9v11H5V8z"/>
+                </svg>
+              </button>
+              <pre data-code-block></pre>
+            </div>
+          </div>
+          <div class="note">特点：激活态非常强，后台产品感明显。缺点是相对更“重”，不如前两版轻盈。</div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    const samples = {
+      retainedList: {
+        curl: `curl -s "https://api.example.com/api/admin/retained-mails?page=1&size=20" \\
+  -H "Authorization: Bearer tm_xxxxxxxxxxxx"`,
+        python: `import requests
+
+base_url = "https://api.example.com"
+api_key = "tm_xxxxxxxxxxxx"
+
+response = requests.get(
+    f"{base_url}/api/admin/retained-mails",
+    params={"page": 1, "size": 20},
+    headers={"Authorization": f"Bearer {api_key}"},
+    timeout=15,
+)
+response.raise_for_status()
+print(response.json())`
+      },
+      renewMailbox: {
+        curl: `curl -s -X PUT "https://api.example.com/api/mailboxes/MAILBOX_ID/renew" \\
+  -H "Authorization: Bearer tm_xxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"minutes": 30}'`,
+        python: `import requests
+
+base_url = "https://api.example.com"
+mailbox_id = "MAILBOX_ID"
+api_key = "tm_xxxxxxxxxxxx"
+
+response = requests.put(
+    f"{base_url}/api/mailboxes/{mailbox_id}/renew",
+    json={"minutes": 30},
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    timeout=15,
+)
+response.raise_for_status()
+print(response.json())`
+      },
+      createMailbox: {
+        curl: `curl -s -X POST "https://api.example.com/api/mailboxes" \\
+  -H "Authorization: Bearer tm_xxxxxxxxxxxx" \\
+  -H "Content-Type: application/json" \\
+  -d '{"address":"demo","domain":"example.com"}'`,
+        python: `import requests
+
+base_url = "https://api.example.com"
+api_key = "tm_xxxxxxxxxxxx"
+
+payload = {
+    "address": "demo",
+    "domain": "example.com",
+}
+
+response = requests.post(
+    f"{base_url}/api/mailboxes",
+    json=payload,
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    },
+    timeout=15,
+)
+response.raise_for_status()
+print(response.json())`
+      },
+      retainedDetail: {
+        curl: `curl -s "https://api.example.com/api/admin/retained-mails/RETAINED_MAIL_ID" \\
+  -H "Authorization: Bearer tm_xxxxxxxxxxxx"`,
+        python: `import requests
+
+base_url = "https://api.example.com"
+retained_mail_id = "RETAINED_MAIL_ID"
+api_key = "tm_xxxxxxxxxxxx"
+
+response = requests.get(
+    f"{base_url}/api/admin/retained-mails/{retained_mail_id}",
+    headers={"Authorization": f"Bearer {api_key}"},
+    timeout=15,
+)
+response.raise_for_status()
+print(response.json())`
+      }
+    };
+
+    const cards = document.querySelectorAll('[data-code-card]');
+    const sampleKeys = ['retainedList', 'renewMailbox', 'createMailbox', 'retainedDetail'];
+
+    cards.forEach((card, index) => {
+      const sample = samples[sampleKeys[index]];
+      const buttons = card.querySelectorAll('[data-lang]');
+      const codeBlock = card.querySelector('[data-code-block]');
+      const codeArea = card.querySelector('.code-area');
+      const copyBtn = card.querySelector('[data-copy-btn]');
+      let revealTimer;
+
+      function render(lang) {
+        buttons.forEach(btn => btn.classList.toggle('active', btn.dataset.lang === lang));
+        codeBlock.textContent = sample[lang];
+        copyBtn.dataset.copy = sample[lang];
+        copyBtn.setAttribute('data-lang', lang);
+        copyBtn.setAttribute('aria-label', `复制代码（${lang}）`);
+        copyBtn.setAttribute('title', `复制代码（${lang}）`);
+      }
+
+      function revealCopyButton() {
+        codeArea.classList.add('reveal-copy');
+        clearTimeout(revealTimer);
+        revealTimer = setTimeout(() => codeArea.classList.remove('reveal-copy'), 800);
+      }
+
+      codeArea.addEventListener('mousemove', revealCopyButton);
+      codeArea.addEventListener('mouseenter', revealCopyButton);
+      codeArea.addEventListener('focusin', revealCopyButton);
+
+      buttons.forEach(btn => btn.addEventListener('click', () => render(btn.dataset.lang)));
+      copyBtn.addEventListener('click', async () => {
+        const text = copyBtn.dataset.copy || '';
+        try {
+          await navigator.clipboard.writeText(text);
+          const oldLabel = copyBtn.getAttribute('aria-label') || '复制代码';
+          copyBtn.setAttribute('aria-label', '已复制');
+          copyBtn.setAttribute('title', '已复制');
+          copyBtn.style.color = 'var(--clr-jade)';
+          setTimeout(() => {
+            copyBtn.setAttribute('aria-label', oldLabel);
+            copyBtn.setAttribute('title', oldLabel);
+            copyBtn.style.color = '';
+          }, 1200);
+        } catch {
+          const oldLabel = copyBtn.getAttribute('aria-label') || '复制代码';
+          copyBtn.setAttribute('aria-label', '复制失败');
+          copyBtn.setAttribute('title', '复制失败');
+          copyBtn.style.color = 'var(--clr-danger)';
+          setTimeout(() => {
+            copyBtn.setAttribute('aria-label', oldLabel);
+            copyBtn.setAttribute('title', oldLabel);
+            copyBtn.style.color = '';
+          }, 1200);
+        }
+      });
+
+      render('curl');
+    });
+  </script>
+</body>
+</html>
