@@ -108,6 +108,54 @@ http://<服务器IP>
 
 ---
 
+## GitHub Actions 构建 Docker 镜像
+
+仓库现在包含 GitHub Actions 工作流：`.github/workflows/docker.yml`。
+
+默认行为：
+
+- `pull_request`：执行多架构镜像构建校验（不推送镜像）
+- `push` 到 `main` / `master`：构建并推送镜像到 `ghcr.io/<owner>/<repo>`
+- `push` 标签 `v*`：额外产出语义化版本标签
+- `workflow_dispatch`：支持手动触发
+
+镜像标签策略：
+
+- 分支名：如 `main`
+- PR 标签：如 `pr-12`
+- Git tag：如 `v1.2.3`、`1.2`
+- 提交哈希：如 `sha-abc1234`
+- 默认分支额外发布 `latest`
+
+首次启用后，可在 GitHub Packages / GHCR 中拉取：
+
+```bash
+docker pull ghcr.io/<owner>/<repo>:latest
+```
+
+---
+
+## 关于 25 端口与 Nginx 反向代理
+
+这个需求可以分成两层理解：
+
+1. **Nginx 代收 TCP/25 再转给 Postfix**：技术上可以通过 Nginx `stream` 做四层转发。
+2. **把 Web 和 SMTP 合并成“同一个对外端口”**：常规公网收件场景下**不可行**。
+
+原因是：
+
+- 互联网邮件投递依赖 MX，外部邮件服务器会直接连接你的 **TCP/25**
+- Nginx 的 HTTP/HTTPS 反代无法把 SMTP 复用进 `80/443`
+- 即便改成 Nginx `stream` 转发，**对外仍然必须暴露 25 端口**，只是内部由 Nginx 转给 Postfix
+
+所以如果目标是“正常接收公网邮件”，当前部署拓扑仍应保留：
+
+- `80`：Web / API
+- `25`：SMTP 收件
+
+也就是说，这次我没有把 25 端口改成走 Nginx 再试图合并到单一外网端口，因为那样不能满足真实 SMTP 收件需求。
+
+---
 ## 环境变量
 
 用户通常只需要编辑根目录 `.env` 文件。当前模板如下：
@@ -333,3 +381,4 @@ tempmail/
 ## 许可证
 
 MIT
+
